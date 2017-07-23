@@ -30,11 +30,11 @@ setCodePage("ascii");									// character set of the gcode file
 //setEOL(CRLF);											// end-of-line type : use CRLF for windows
 
 capabilities = CAPABILITY_MILLING | CAPABILITY_JET;		// intended for a CNC, so Milling
-tolerance = spatial(0.005, MM);
+tolerance = spatial(0.01, MM);
 minimumChordLength = spatial(0.01, MM);
-minimumCircularRadius = spatial(0.01, MM);
+minimumCircularRadius = spatial(0.375, MM);
 maximumCircularRadius = spatial(1000, MM);
-minimumCircularSweep = toRad(0.01);
+minimumCircularSweep = toRad(1);
 maximumCircularSweep = toRad(180);
 allowHelicalMoves = true;
 allowedCircularPlanes = undefined;
@@ -45,10 +45,10 @@ var GRBLunits = MM;										// GRBL controller set to mm (Metric). Allows for a
 // user-defined properties : defaults are set, but they can be changed from a dialog box in Fusion when doing a post.
 properties =
 	{
-	spindleOnOffDelay: 0.8,				// time (in seconds) the spindle needs to get up to speed or stop
+	spindleOnOffDelay: 1.8,				// time (in seconds) the spindle needs to get up to speed or stop
 	spindleTwoDirections : false,		// true : spindle can rotate clockwise and counterclockwise, will send M3 and M4. false : spindle can only go clockwise, will only send M3
 	hasCoolant : false,					// true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
-	hasSpeedDial : true,				// true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
+	hasSpeedDial : false,				// true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
 	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
 	machineHomeX : -10,
 	machineHomeY : -10
@@ -58,7 +58,7 @@ properties =
 var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
 
-var xyzFormat = createFormat({decimals:(unit == MM ? 3 : 4)});
+var xyzFormat = createFormat({decimals:(unit == MM ? 4 : 5)});
 var arcFormat = createFormat({decimals:(unit == MM ? 4 : 5)});    // uses extra digit in arcs
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
