@@ -29,15 +29,17 @@ extension = "nc";										// file extension of the gcode file
 setCodePage("ascii");									// character set of the gcode file
 //setEOL(CRLF);											// end-of-line type : use CRLF for windows
 
-capabilities = CAPABILITY_MILLING | CAPABILITY_JET;		// intended for a CNC, so Milling
+capabilities = CAPABILITY_MILLING | CAPABILITY_JET;		// intended for a CNC, so Milling, and waterjet/plasma/laser
 tolerance = spatial(0.01, MM);
 minimumChordLength = spatial(0.01, MM);
-minimumCircularRadius = spatial(0.375, MM);
+minimumCircularRadius = spatial(0.01, MM);
 maximumCircularRadius = spatial(1000, MM);
-minimumCircularSweep = toRad(1);
+minimumCircularSweep = toRad(0.1); // was 0.01
 maximumCircularSweep = toRad(180);
 allowHelicalMoves = true;
-allowedCircularPlanes = undefined;
+allowedCircularPlanes = (1 << PLANE_XY);// | (1 << PLANE_ZX) | (1 << PLANE_YZ); // only XY, ZX, and YZ planes
+// the above circular plane limitation appears to be a solution to the faulty arcs problem 
+// an alternative is to set either minimumChordLength or minimumCircularRadius to a much larger value, like 0.5mm
 
 var GRBLunits = MM;										// GRBL controller set to mm (Metric). Allows for a consistency check between GRBL settings and CAM file output
 // var GRBLunits = IN;
@@ -59,7 +61,7 @@ var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
 
 var xyzFormat = createFormat({decimals:(unit == MM ? 4 : 5)});
-var arcFormat = createFormat({decimals:(unit == MM ? 4 : 5)});    // uses extra digit in arcs
+var arcFormat = createFormat({decimals:(unit == MM ? 4 : 5)});    // uses extra digit in arcs - not always effective, just set them the same
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
 var secFormat = createFormat({decimals:1, forceDecimal:true});
@@ -181,7 +183,7 @@ function onOpen()
 	myMachine.setModel("OX CNC 1000 x 750");
 	myMachine.setControl("GRBL V0.9j");
 
-	writeln("%");																								// Punch-Tape Begin, commented out as not supported by GRBL
+	//writeln("%");																			// Punch-Tape Begin, commented out as not supported by GRBL/some GUI's
 
 	var productName = getProduct();
 	writeComment("Made in : " + productName);
