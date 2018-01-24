@@ -137,6 +137,19 @@ function writeBlock()
 	writeWords(arguments);
 	}
 
+/**
+Thanks to nyccnc.com
+Thanks to the Autodesk Knowledge Network for help with this at https://knowledge.autodesk.com/support/hsm/learn-explore/caas/sfdcarticles/sfdcarticles/How-to-use-Manual-NC-options-to-manually-add-code-with-Fusion-360-HSM-CAM.html! 
+*/   
+function onPassThrough(text) {
+  var commands = String(text).split(",");
+  for (text in commands) {
+    writeBlock(commands[text]);
+  }
+}
+
+  
+
 function writeComment(text)
 	{
 	// Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
