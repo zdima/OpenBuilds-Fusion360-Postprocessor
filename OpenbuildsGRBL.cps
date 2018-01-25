@@ -148,8 +148,6 @@ function onPassThrough(text) {
   }
 }
 
-  
-
 function writeComment(text)
 	{
 	// Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
