@@ -15,13 +15,14 @@ This post-Processor should work on GRBL-based machines such as
 07/SEP/2016 - V4 : Added support for INCHES. Added a safe retract at beginning of first section
 11/OCT/2016 - V5
 30/JAN/2017 - V6 : Modified capabilities to also allow waterjet, laser-cutting..
+28 Jan 2018 - V7 : swarfered to fix arc errors and add gotoMCSatend option
 */
 
-description = "Openbuilds Grbl";
+description = "Openbuilds Grbl V7";
 vendor = "Openbuilds";
 vendorUrl = "http://openbuilds.com";
 model = "OX";
-description = "Open Hardware Desktop CNC Router";
+description = "Open Hardware Desktop CNC Router using GRBL";
 legal = "Copyright (C) 2012-2016 by Autodesk, Inc.";
 certificationLevel = 2;
 
@@ -39,7 +40,7 @@ maximumCircularSweep = toRad(180);
 allowHelicalMoves = true;
 allowedCircularPlanes = (1 << PLANE_XY);// | (1 << PLANE_ZX) | (1 << PLANE_YZ); // only XY, ZX, and YZ planes
 // the above circular plane limitation appears to be a solution to the faulty arcs problem 
-// an alternative is to set either minimumChordLength or minimumCircularRadius to a much larger value, like 0.5mm
+// an alternative is to set EITHER minimumChordLength OR minimumCircularRadius to a much larger value, like 0.5mm
 
 var GRBLunits = MM;										// GRBL controller set to mm (Metric). Allows for a consistency check between GRBL settings and CAM file output
 // var GRBLunits = IN;
@@ -53,15 +54,16 @@ properties =
 	hasSpeedDial : false,				// true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
 	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
 	machineHomeX : -10,
-	machineHomeY : -10
+	machineHomeY : -10,
+   gotoMCSatend : false             // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
 	};
 
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
 var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
 
-var xyzFormat = createFormat({decimals:(unit == MM ? 4 : 5)});
-var arcFormat = createFormat({decimals:(unit == MM ? 4 : 5)});    // uses extra digit in arcs - not always effective, just set them the same
+var xyzFormat = createFormat({decimals:(unit == MM ? 5 : 6)});
+//var arcFormat = createFormat({decimals:(unit == MM ? 5 : 6)});    // uses extra digit in arcs - not always effective, just set them the same
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
 var secFormat = createFormat({decimals:1, forceDecimal:true});
@@ -73,14 +75,14 @@ var zOutput = createVariable({prefix:"Z"}, xyzFormat);
 var feedOutput = createVariable({prefix:"F"}, feedFormat);
 var sOutput = createVariable({prefix:"S", force:true}, rpmFormat);
 
-// for arcs, use extra digit
-var xaOutput = createVariable({prefix:"X"}, arcFormat);
-var yaOutput = createVariable({prefix:"Y"}, arcFormat);
-var zaOutput = createVariable({prefix:"Z"}, arcFormat);
+// for arcs, use extra digit (not used anymore from jan 2018)
+var xaOutput = createVariable({prefix:"X"}, xyzFormat);
+var yaOutput = createVariable({prefix:"Y"}, xyzFormat);
+var zaOutput = createVariable({prefix:"Z"}, xyzFormat);
 
-var iOutput = createReferenceVariable({prefix:"I"}, arcFormat);
-var jOutput = createReferenceVariable({prefix:"J"}, arcFormat);
-var kOutput = createReferenceVariable({prefix:"K"}, arcFormat);
+var iOutput = createReferenceVariable({prefix:"I"}, xyzFormat);
+var jOutput = createReferenceVariable({prefix:"J"}, xyzFormat);
+var kOutput = createReferenceVariable({prefix:"K"}, xyzFormat);
 
 var gMotionModal = createModal({}, gFormat); 											// modal group 1 // G0-G3, ...
 var gPlaneModal = createModal({onchange:function () {gMotionModal.reset();}}, gFormat); // modal group 2 // G17-19
@@ -285,6 +287,9 @@ function forceXYZ()
 	xOutput.reset();
 	yOutput.reset();
 	zOutput.reset();
+	xaOutput.reset();
+	yaOutput.reset();
+	zaOutput.reset();
 	}
 
 function forceAny()
@@ -468,7 +473,8 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 			linearize(tolerance);
 			return;
 			}
-
+      xaOutput.reset();
+      yaOutput.reset();
 		switch (getCircularPlane())
 			{
 			case PLANE_XY:
@@ -486,7 +492,9 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 		}
 	else
 		{
-		switch (getCircularPlane())
+      xaOutput.reset();  // always output X and Y words becasue GRBL faults if they are both missing from arcs
+      yaOutput.reset();
+      switch (getCircularPlane())
 			{
 			case PLANE_XY:
 				writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
@@ -500,6 +508,8 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 			default:
 				linearize(tolerance);
 			}
+      xaOutput.reset();   // always output X and Y words becasue GRBL faults if they are both missing from arcs
+      yaOutput.reset();         
 		}
 	}
 
@@ -515,6 +525,7 @@ function onClose()
 	writeBlock(gAbsIncModal.format(90));	// Set to absolute coordinates for the following moves
 	if (isMilling())
 		{
+      gMotionModal.reset();  // for ease of reading the code always output the G0 words
 		writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(properties.machineHomeZ));	// Retract spindle to Machine Z Home
 		}
 	writeBlock(mFormat.format(5));																					// Stop Spindle
@@ -522,11 +533,18 @@ function onClose()
 		{
 		writeBlock(mFormat.format(9));																				// Stop Coolant
 		}
-	onDwell(properties.spindleOnOffDelay);																			// Wait for spindle to stop
-	writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "X" + xyzFormat.format(properties.machineHomeX), "Y" + xyzFormat.format(properties.machineHomeY));	// Return to home position
-
-	writeBlock(mFormat.format(30));																					// Program End
-	writeln("%");																									// EndOfFile marker
+	//onDwell(properties.spindleOnOffDelay);																			// Wait for spindle to stop
+   gMotionModal.reset();
+	if (properties.gotoMCSatend)
+      {  // go to MCS home
+      writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "X" + xyzFormat.format(properties.machineHomeX), "Y" + xyzFormat.format(properties.machineHomeY));	// Return to home position
+      }
+   else
+      {  // go to WCS home
+      writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), "X" + xyzFormat.format(properties.machineHomeX), "Y" + xyzFormat.format(properties.machineHomeY));	
+      }
+	writeBlock(mFormat.format(30));  // Program End
+	writeln("%");							// EndOfFile marker
 	}
 
 
