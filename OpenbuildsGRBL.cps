@@ -16,9 +16,10 @@ This post-Processor should work on GRBL-based machines such as
 11/OCT/2016 - V5
 30/JAN/2017 - V6 : Modified capabilities to also allow waterjet, laser-cutting..
 28 Jan 2018 - V7 : swarfered to fix arc errors and add gotoMCSatend option
+16 Feb 2019 - V8 : swarfer , ensure X, Y, Z  output when linear differences are very small
 */
 
-description = "Openbuilds Grbl V7";
+description = "Openbuilds Grbl V8";
 vendor = "Openbuilds";
 vendorUrl = "http://openbuilds.com";
 model = "OX";
@@ -32,8 +33,8 @@ setCodePage("ascii");									// character set of the gcode file
 
 capabilities = CAPABILITY_MILLING | CAPABILITY_JET;		// intended for a CNC, so Milling, and waterjet/plasma/laser
 tolerance = spatial(0.01, MM);
-minimumChordLength = spatial(0.01, MM);
-minimumCircularRadius = spatial(0.01, MM);
+minimumChordLength = spatial(0.25, MM);
+minimumCircularRadius = spatial(0.125, MM);
 maximumCircularRadius = spatial(1000, MM);
 minimumCircularSweep = toRad(0.1); // was 0.01
 maximumCircularSweep = toRad(180);
@@ -194,7 +195,7 @@ function onOpen()
 	myMachine.setNumberOfWorkOffsets(6);
 	myMachine.setVendor("OpenBuilds");
 	myMachine.setModel("OX CNC 1000 x 750");
-	myMachine.setControl("GRBL V0.9j");
+	myMachine.setControl("GRBL V1.1");
 
 	//writeln("%");																			// Punch-Tape Begin, commented out as not supported by GRBL/some GUI's
 
@@ -428,6 +429,28 @@ function onRapid(_x, _y, _z)
 
 function onLinear(_x, _y, _z, feed)
 	{
+   var start = getCurrentPosition();
+   var limit = (unit == MM) ? 0.75 : 0.030
+   // for very small moves the stupid formatter does not always detect small changes in X or Y so we have to force a reset
+   // i wish i could see the code for the formatter...
+   // this was highlighted by a 1.5mm wide slot, 3.5mm long being cut with a 1mm bit. the slot is tilted at 45deg.  
+   // on some slots the end of the straight portion was not output resulting in an arc error on the next line.
+   if (Math.abs(_x - start.x) < limit)
+      {
+   	//writeComment("resettign X");
+      xOutput.reset();
+      }
+   if (Math.abs(_y - start.y) < 0.75)
+      {
+   	//writeComment("resettign Y");
+      yOutput.reset();
+      }
+   if (Math.abs(_z - start.z) < 0.75)
+      {
+   	//writeComment("resettign Z");
+      zOutput.reset();
+      }
+   
 	var x = xOutput.format(_x);
 	var y = yOutput.format(_y);
 	var z = zOutput.format(_z);
