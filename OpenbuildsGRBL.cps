@@ -17,6 +17,7 @@ This post-Processor should work on GRBL-based machines such as
 30/JAN/2017 - V6 : Modified capabilities to also allow waterjet, laser-cutting..
 28 Jan 2018 - V7 : swarfered to fix arc errors and add gotoMCSatend option
 16 Feb 2019 - V8 : swarfer , ensure X, Y, Z  output when linear differences are very small
+27 Feb 2019 - V9 : swarfer : found out the correct way to force word output for XYZIJK, see 'force:true' in CreateVariable
 */
 
 description = "Openbuilds Grbl V8";
@@ -70,20 +71,20 @@ var rpmFormat = createFormat({decimals:0});
 var secFormat = createFormat({decimals:1, forceDecimal:true});
 var taperFormat = createFormat({decimals:1, scale:DEG});
 
-var xOutput = createVariable({prefix:"X"}, xyzFormat);
-var yOutput = createVariable({prefix:"Y"}, xyzFormat);
-var zOutput = createVariable({prefix:"Z"}, xyzFormat);
+var xOutput = createVariable({prefix:"X", force:true}, xyzFormat);
+var yOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
+var zOutput = createVariable({prefix:"Z", force:true}, xyzFormat);
 var feedOutput = createVariable({prefix:"F"}, feedFormat);
 var sOutput = createVariable({prefix:"S", force:true}, rpmFormat);
 
 // for arcs, use extra digit (not used anymore from jan 2018)
-var xaOutput = createVariable({prefix:"X"}, xyzFormat);
-var yaOutput = createVariable({prefix:"Y"}, xyzFormat);
-var zaOutput = createVariable({prefix:"Z"}, xyzFormat);
+var xaOutput = createVariable({prefix:"X", force:true}, xyzFormat);
+var yaOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
+var zaOutput = createVariable({prefix:"Z", force:true}, xyzFormat);
 
-var iOutput = createReferenceVariable({prefix:"I"}, xyzFormat);
-var jOutput = createReferenceVariable({prefix:"J"}, xyzFormat);
-var kOutput = createReferenceVariable({prefix:"K"}, xyzFormat);
+var iOutput = createReferenceVariable({prefix:"I", force:true}, xyzFormat);
+var jOutput = createReferenceVariable({prefix:"J", force:true}, xyzFormat);
+var kOutput = createReferenceVariable({prefix:"K", force:true}, xyzFormat);
 
 var gMotionModal = createModal({}, gFormat); 											// modal group 1 // G0-G3, ...
 var gPlaneModal = createModal({onchange:function () {gMotionModal.reset();}}, gFormat); // modal group 2 // G17-19
@@ -429,28 +430,6 @@ function onRapid(_x, _y, _z)
 
 function onLinear(_x, _y, _z, feed)
 	{
-   var start = getCurrentPosition();
-   var limit = (unit == MM) ? 0.75 : 0.030
-   // for very small moves the stupid formatter does not always detect small changes in X or Y so we have to force a reset
-   // i wish i could see the code for the formatter...
-   // this was highlighted by a 1.5mm wide slot, 3.5mm long being cut with a 1mm bit. the slot is tilted at 45deg.  
-   // on some slots the end of the straight portion was not output resulting in an arc error on the next line.
-   if (Math.abs(_x - start.x) < limit)
-      {
-   	//writeComment("resettign X");
-      xOutput.reset();
-      }
-   if (Math.abs(_y - start.y) < 0.75)
-      {
-   	//writeComment("resettign Y");
-      yOutput.reset();
-      }
-   if (Math.abs(_z - start.z) < 0.75)
-      {
-   	//writeComment("resettign Z");
-      zOutput.reset();
-      }
-   
 	var x = xOutput.format(_x);
 	var y = yOutput.format(_y);
 	var z = zOutput.format(_z);
@@ -496,8 +475,6 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 			linearize(tolerance);
 			return;
 			}
-      xaOutput.reset();
-      yaOutput.reset();
 		switch (getCircularPlane())
 			{
 			case PLANE_XY:
@@ -515,8 +492,6 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 		}
 	else
 		{
-      xaOutput.reset();  // always output X and Y words becasue GRBL faults if they are both missing from arcs
-      yaOutput.reset();
       switch (getCircularPlane())
 			{
 			case PLANE_XY:
@@ -531,8 +506,6 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 			default:
 				linearize(tolerance);
 			}
-      xaOutput.reset();   // always output X and Y words becasue GRBL faults if they are both missing from arcs
-      yaOutput.reset();         
 		}
 	}
 
