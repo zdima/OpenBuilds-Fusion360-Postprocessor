@@ -4,7 +4,7 @@ Custom Post-Processor for GRBL based Openbuilds-style CNC machines
 Using Exiting Post Processors as inspiration
 For documentation, see GitHub Wiki : https://github.com/Strooom/GRBL-Post-Processor/wiki
 This post-Processor should work on GRBL-based machines such as
-* Openbuilds - OX, C-Beam
+* Openbuilds - OX, C-Beam, Workbee, LEAD
 * Inventables - X-Carve
 * ShapeOko / Carbide3D
 * your spindle is Makita RT0700 or Dewalt 611
@@ -18,14 +18,15 @@ This post-Processor should work on GRBL-based machines such as
 28 Jan 2018 - V7 : swarfered to fix arc errors and add gotoMCSatend option
 16 Feb 2019 - V8 : swarfer , ensure X, Y, Z  output when linear differences are very small
 27 Feb 2019 - V9 : swarfer : found out the correct way to force word output for XYZIJK, see 'force:true' in CreateVariable
+27 Feb 2018 - V10 : from sharmstr : Added user properties for router type. Added rounding of dial settings to 1 decimal.
 */
 
-description = "Openbuilds Grbl V8";
+description = "Openbuilds Grbl V10";
 vendor = "Openbuilds";
 vendorUrl = "http://openbuilds.com";
 model = "OX";
 description = "Open Hardware Desktop CNC Router using GRBL";
-legal = "Copyright (C) 2012-2016 by Autodesk, Inc.";
+legal = "Copyright (C) 2012-2019 by Autodesk, Inc.";
 certificationLevel = 2;
 
 extension = "nc";										// file extension of the gcode file
@@ -53,12 +54,34 @@ properties =
 	spindleOnOffDelay: 1.8,				// time (in seconds) the spindle needs to get up to speed or stop
 	spindleTwoDirections : false,		// true : spindle can rotate clockwise and counterclockwise, will send M3 and M4. false : spindle can only go clockwise, will only send M3
 	hasCoolant : false,					// true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
-	hasSpeedDial : false,				// true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
+	routerType : "Other",	
+	speedDial: false, // true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
 	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
 	machineHomeX : -10,
 	machineHomeY : -10,
    gotoMCSatend : false             // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
 	};
+
+// user-defined property definitions
+propertyDefinitions = {
+	routerType:  {
+		title: "Spindle type",
+		description: "Select the type of spindle you have",
+		type: "enum",
+		values:[
+		  {title:"Other", id:"other"},
+		  {title:"Makita RT0700", id:"Makita"},
+		  {title:"Dewalt 611", id:"Dewalt"}
+		]
+	  },
+	speedDial:  {
+		title: "Has Speed Dial",
+		description: "Does your router have a speed dial?",
+		type: "boolean",
+		},
+	//generateMultiple: {title:"Multiple Files", description: "Generate multiple files. One for each tool change.", type:"boolean"},
+	// multifiles is a work in progress, lets not confuse anyone with an option that does nothing
+};
 
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
 var gFormat = createFormat({prefix:"G", decimals:0});
@@ -103,13 +126,18 @@ function toTitleCase(str)
 
 function rpm2dial(rpm)
 	{
-	// translates an RPM for the spindle into a dial value, eg for the Makita RT0700 and Dewalt 611 routers
-	// additionaly, check that spindle rpm is between minimun and maximum of what our spindle can do
+	// translates an RPM for the spindle into a dial value, eg. for the Makita RT0700 and Dewalt 611 routers
+	// additionally, check that spindle rpm is between minimum and maximum of what our spindle can do
 
 	// array which maps spindle speeds to router dial settings,
 	// according to Makita RT0700 Manual : 1=10000, 2=12000, 3=17000, 4=22000, 5=27000, 6=30000
-	var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
-
+	// according to Dewalt 611 Manual : 1=16000, 2=18200, 3=20400, 4=22600, 5=24800, 6=27000
+	
+	if (properties.routerType == "Dewalt"){
+		var speeds = [0, 16000, 18200, 20400, 22600, 24800, 27000];
+	} else {
+		var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
+	}
 	if (rpm < speeds[1])
 		{
 		alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm");
@@ -127,7 +155,7 @@ function rpm2dial(rpm)
 		{
 		if ((rpm >= speeds[i]) && (rpm <= speeds[i+1]))
 			{
-			return ((rpm - speeds[i]) / (speeds[i+1] - speeds[i])) + i;
+			return (((rpm - speeds[i]) / (speeds[i+1] - speeds[i])) + i).toFixed(1);
 			}
 		}
 
@@ -195,14 +223,14 @@ function onOpen()
 	myMachine.setNumberOfTools(1);
 	myMachine.setNumberOfWorkOffsets(6);
 	myMachine.setVendor("OpenBuilds");
-	myMachine.setModel("OX CNC 1000 x 750");
+	myMachine.setModel("OX,Lead,Sphinx etc");
 	myMachine.setControl("GRBL V1.1");
 
 	//writeln("%");																			// Punch-Tape Begin, commented out as not supported by GRBL/some GUI's
 
 	var productName = getProduct();
 	writeComment("Made in : " + productName);
-	writeComment("G-Code optimized for " + myMachine.getVendor() + " " + myMachine.getModel() + " with " + myMachine.getControl() + " controller");
+	//writeComment("G-Code optimized for " + myMachine.getVendor() + " " + myMachine.getModel() + " with " + myMachine.getControl() + " controller");
 
 	writeln("");
 
@@ -237,9 +265,9 @@ function onOpen()
 		   writeComment("  Work Coordinate System : G" + (section.workOffset + 53));
          }
 		writeComment("  Tool : " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + "mm, Len = " + tool.fluteLength + "mm");
-		if (properties.hasSpeedDial)
+		if (properties.speedDial)
 			{
-			writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm));
+			writeComment("  Spindle : RPM = " + rpm + ", set "+ properties.routerType +" router dial to " + rpm2dial(rpm));
 			}
 		else
 			{
