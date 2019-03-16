@@ -4,7 +4,7 @@ Custom Post-Processor for GRBL based Openbuilds-style CNC machines
 Using Exiting Post Processors as inspiration
 For documentation, see GitHub Wiki : https://github.com/Strooom/GRBL-Post-Processor/wiki
 This post-Processor should work on GRBL-based machines such as
-* Openbuilds - OX, C-Beam, Workbee, LEAD
+* Openbuilds - OX, C-Beam, Workbee, LEAD and other GRBL based mills
 * Inventables - X-Carve
 * ShapeOko / Carbide3D
 * your spindle is Makita RT0700 or Dewalt 611
@@ -19,13 +19,16 @@ This post-Processor should work on GRBL-based machines such as
 16 Feb 2019 - V8 : swarfer , ensure X, Y, Z  output when linear differences are very small
 27 Feb 2019 - V9 : swarfer : found out the correct way to force word output for XYZIJK, see 'force:true' in CreateVariable
 27 Feb 2018 - V10 : from sharmstr : Added user properties for router type. Added rounding of dial settings to 1 decimal.
+16 Mar 2019 - V11 : from sharmstr : Added rounding of tool length to 2 decimals.  Added check for machine config in setup. 
+										Changed RPM warning so it includes operation. Added multiple .nc file generation for tool changes.
+										Added check for duplicate tool numbers with different geometry.
 */
 
-description = "Openbuilds Grbl V10";
+description = "Openbuilds Grbl V11";
 vendor = "Openbuilds";
 vendorUrl = "http://openbuilds.com";
-model = "OX";
-description = "Open Hardware Desktop CNC Router using GRBL";
+model = "GRBL";
+description = "Open Hardware CNC Router V11 using GRBL";
 legal = "Copyright (C) 2012-2019 by Autodesk, Inc.";
 certificationLevel = 2;
 
@@ -56,6 +59,7 @@ properties =
 	hasCoolant : false,					// true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
 	routerType : "Other",	
 	speedDial: false, // true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
+	generateMultiple: true,          // specifies if a file should be generated for each tool change
 	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
 	machineHomeX : -10,
 	machineHomeY : -10,
@@ -79,8 +83,7 @@ propertyDefinitions = {
 		description: "Does your router have a speed dial?",
 		type: "boolean",
 		},
-	//generateMultiple: {title:"Multiple Files", description: "Generate multiple files. One for each tool change.", type:"boolean"},
-	// multifiles is a work in progress, lets not confuse anyone with an option that does nothing
+	generateMultiple: {title:"Muliple Files", description: "Generate multiple files. One for each tool change.", type:"boolean"},
 };
 
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
@@ -88,6 +91,7 @@ var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
 
 var xyzFormat = createFormat({decimals:(unit == MM ? 5 : 6)});
+var abcFormat = createFormat({decimals:3, forceDecimal:true, scale:DEG});
 //var arcFormat = createFormat({decimals:(unit == MM ? 5 : 6)});    // uses extra digit in arcs - not always effective, just set them the same
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
@@ -115,6 +119,10 @@ var gAbsIncModal = createModal({}, gFormat); 											// modal group 3 // G90-
 var gFeedModeModal = createModal({}, gFormat); 											// modal group 5 // G93-94
 var gUnitModal = createModal({}, gFormat); 												// modal group 6 // G20-21
 
+var sequenceNumber = 1;        //used for multiple file naming
+var multipleToolError = false; //used for alerting during single file generation with multiple tools
+var filesToGenerate = 1;       //used to figure out how many files will be generated so we can diplay in header
+
 function toTitleCase(str)
 	{
 	// function to reformat a string to 'title case'
@@ -124,11 +132,10 @@ function toTitleCase(str)
 		});
 	}
 
-function rpm2dial(rpm)
+function rpm2dial(rpm, op)
 	{
 	// translates an RPM for the spindle into a dial value, eg. for the Makita RT0700 and Dewalt 611 routers
 	// additionally, check that spindle rpm is between minimum and maximum of what our spindle can do
-
 	// array which maps spindle speeds to router dial settings,
 	// according to Makita RT0700 Manual : 1=10000, 2=12000, 3=17000, 4=22000, 5=27000, 6=30000
 	// according to Dewalt 611 Manual : 1=16000, 2=18200, 3=20400, 4=22600, 5=24800, 6=27000
@@ -140,13 +147,13 @@ function rpm2dial(rpm)
 	}
 	if (rpm < speeds[1])
 		{
-		alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm");
+		alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.");
 		return 1;
 		}
 
 	if (rpm > speeds[speeds.length - 1])
 		{
-		alert("Warning", rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm");
+		alert("Warning", rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm in the " + op + " operation.");
 		return (speeds.length - 1);
 		}
 
@@ -180,6 +187,27 @@ function onPassThrough(text) {
   }
 }
 
+function myMachineConfig() {
+	// 3. here you can set all the properties of your machine if you havent set up a machine config in CAM.  These are optional and only used to print in the header.
+	myMachine = getMachineConfiguration();
+	if (!myMachine.getVendor()) {
+		// machine config not found so we'll use the info below
+		myMachine.setWidth(600);
+		myMachine.setDepth(800);
+		myMachine.setHeight(130);
+		myMachine.setMaximumSpindlePower(700);
+		myMachine.setMaximumSpindleSpeed(30000);
+		myMachine.setMilling(true);
+		myMachine.setTurning(false);
+		myMachine.setToolChanger(false);
+		myMachine.setNumberOfTools(1);
+		myMachine.setNumberOfWorkOffsets(6);
+		myMachine.setVendor("OpenBuilds");
+		myMachine.setModel("GRBL Controller");
+		myMachine.setControl("GRBL V1.1");
+	}
+}
+
 function writeComment(text)
 	{
 	// Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
@@ -187,6 +215,113 @@ function writeComment(text)
 	// Finally put everything between () as this is the way GRBL & UGCS expect comments
 	writeln("(" + String(text).replace(/[^a-zA-Z\d :=,.]+/g, " ") + ")");
 	}
+
+   
+function writeHeader(secID) 
+{
+	if (multipleToolError)
+      {
+      writeComment("Warning: Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
+      writeln("");
+      }
+    
+   var productName = getProduct();
+	writeComment("Made in : " + productName);
+	writeComment("G-Code optimized for " + myMachine.getVendor() + " " + myMachine.getModel() + " with " + myMachine.getControl() + " controller");
+
+	writeln("");
+
+	if (programName) {
+		writeComment("Program Name : " + programName);
+	}
+	if (programComment) {
+		writeComment("Program Comments : " + programComment);
+    }
+    writeln("");
+
+    if (properties.generateMultiple) {
+        writeComment(numberOfSections + " Operation" + ((numberOfSections == 1) ? "" : "s") + " in "+ filesToGenerate + " files.");
+        writeComment("This is file: " + sequenceNumber + " of " + filesToGenerate);
+        writeln("");
+        writeComment("This file contains the following operations: ");
+    } else {
+        writeComment(numberOfSections + " Operation" + ((numberOfSections == 1)?"":"s") + " :");
+    }
+    
+	for (var i = secID; i < numberOfSections; ++i) {
+		var section = getSection(i);
+		var tool = section.getTool();
+		var rpm = section.getMaximumSpindleSpeed();
+		if (section.hasParameter("operation-comment")) {
+			writeComment((i+1) + " : " + section.getParameter("operation-comment"));
+			var op = section.getParameter("operation-comment")
+		}
+		else {
+			writeComment(i + 1);
+			var op = i + 1;
+		}
+		if (section.workOffset > 0) {
+			writeComment("  Work Coordinate System : G" + (section.workOffset + 53));
+		}
+		writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + "mm, Len = " + tool.fluteLength.toFixed(2) + "mm");
+		if (properties.speedDial) {
+			writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm, op));
+		} else {
+			writeComment("  Spindle : RPM = " + rpm);
+		}
+		var machineTimeInSeconds = section.getCycleTime();
+		var machineTimeHours = Math.floor(machineTimeInSeconds / 3600);
+		machineTimeInSeconds = machineTimeInSeconds % 3600;
+		var machineTimeMinutes = Math.floor(machineTimeInSeconds / 60);
+		var machineTimeSeconds = Math.floor(machineTimeInSeconds % 60);
+		var machineTimeText = "  Machining time : ";
+		if (machineTimeHours > 0) {
+			machineTimeText = machineTimeText + machineTimeHours + " hours " + machineTimeMinutes + " min ";
+		}
+		else if (machineTimeMinutes > 0) {
+			machineTimeText = machineTimeText + machineTimeMinutes + " min ";
+		}
+		machineTimeText = machineTimeText + machineTimeSeconds + " sec";
+        writeComment(machineTimeText);
+        
+		if (properties.generateMultiple && (i+1 < numberOfSections)) {
+			if (tool.number != getSection(i+1).getTool().number) {
+				writeln("");
+				writeComment("Remaining operations located in additional files.");
+				break;
+			}
+		}
+	}
+
+	writeln("");
+	
+	
+	if (isFirstSection()) {
+		writeBlock(gAbsIncModal.format(90), gFeedModeModal.format(94));
+		writeBlock(gPlaneModal.format(17));
+		switch (unit) {
+			case IN:
+				writeBlock(gUnitModal.format(20));
+				break;
+			case MM:
+				writeBlock(gUnitModal.format(21));
+				break;
+		}
+	} else {
+		// Need to change from modal or the codes wont output in new
+		writeBlock(gFormat.format(90), gFormat.format(94));
+		writeBlock(gFormat.format(17));
+		switch (unit) {
+			case IN:
+				writeBlock(gFormat.format(20));
+				break;
+			case MM:
+				writeBlock(gFormat.format(21));
+				break;
+		}
+	}
+	writeln("");
+}
 
 function onOpen()
 	{
@@ -210,102 +345,51 @@ function onOpen()
 	// 2. is RadiusCompensation not set incorrectly ?
 	onRadiusCompensation();
 
-	// 3. here you set all the properties of your machine, so they can be used later on
-	var myMachine = getMachineConfiguration();
-	myMachine.setWidth(600);
-	myMachine.setDepth(800);
-	myMachine.setHeight(130);
-	myMachine.setMaximumSpindlePower(700);
-	myMachine.setMaximumSpindleSpeed(30000);
-	myMachine.setMilling(true);
-	myMachine.setTurning(false);
-	myMachine.setToolChanger(false);
-	myMachine.setNumberOfTools(1);
-	myMachine.setNumberOfWorkOffsets(6);
-	myMachine.setVendor("OpenBuilds");
-	myMachine.setModel("OX,Lead,Sphinx etc");
-	myMachine.setControl("GRBL V1.1");
+	// 3. moved to top of file
+    myMachineConfig();
 
-	//writeln("%");																			// Punch-Tape Begin, commented out as not supported by GRBL/some GUI's
-
-	var productName = getProduct();
-	writeComment("Made in : " + productName);
-	//writeComment("G-Code optimized for " + myMachine.getVendor() + " " + myMachine.getModel() + " with " + myMachine.getControl() + " controller");
-
-	writeln("");
-
-	if (programName)
-		{
-		writeComment("Program Name : " + programName);
+	// 4.  checking for duplicate tool numbers with the different geometry.
+	if (true) {
+		// check for duplicate tool number
+		for (var i = 0; i < getNumberOfSections(); ++i) {
+			var sectioni = getSection(i);
+			var tooli = sectioni.getTool();
+			if (i < (getNumberOfSections() - 1) && (tooli.number != getSection(i + 1).getTool().number)) {
+				filesToGenerate++;
+			}
+			for (var j = i + 1; j < getNumberOfSections(); ++j) {
+				var sectionj = getSection(j);
+				var toolj = sectionj.getTool();
+				if (tooli.number == toolj.number) {
+					if (xyzFormat.areDifferent(tooli.diameter, toolj.diameter) ||
+						xyzFormat.areDifferent(tooli.cornerRadius, toolj.cornerRadius) ||
+						abcFormat.areDifferent(tooli.taperAngle, toolj.taperAngle) ||
+						(tooli.numberOfFlutes != toolj.numberOfFlutes)) {
+						error(
+							subst(
+								localize("Using the same tool number for different cutter geometry for operation '%1' and '%2'."),
+								sectioni.hasParameter("operation-comment") ? sectioni.getParameter("operation-comment") : ("#" + (i + 1)),
+								sectionj.hasParameter("operation-comment") ? sectionj.getParameter("operation-comment") : ("#" + (j + 1))
+							)
+						);
+						return;
+					}
+				} else {
+					if (properties.generateMultiple == false) {
+						multipleToolError = true;
+					}
+				}
+			}
 		}
-	if (programComment)
-		{
-		writeComment("Program Comments : " + programComment);
+		if (multipleToolError) {
+			alert("Warning", "Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
 		}
-
-	var numberOfSections = getNumberOfSections();
-	writeComment(numberOfSections + " Operation" + ((numberOfSections == 1)?"":"s") + " :");
-
-	for (var i = 0; i < numberOfSections; ++i)
-		{
-		var section = getSection(i);
-		var tool = section.getTool();
-		var rpm = section.getMaximumSpindleSpeed();
-
-		if (section.hasParameter("operation-comment"))
-			{
-			writeComment((i+1) + " : " + section.getParameter("operation-comment"));
-			}
-		else
-			{
-			writeComment(i+1);
-			}
-      if (section.workOffset > 0)
-         {
-		   writeComment("  Work Coordinate System : G" + (section.workOffset + 53));
-         }
-		writeComment("  Tool : " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + "mm, Len = " + tool.fluteLength + "mm");
-		if (properties.speedDial)
-			{
-			writeComment("  Spindle : RPM = " + rpm + ", set "+ properties.routerType +" router dial to " + rpm2dial(rpm));
-			}
-		else
-			{
-			writeComment("  Spindle : RPM = " + rpm);
-			}
-		var machineTimeInSeconds = section.getCycleTime();
-		var machineTimeHours = Math.floor(machineTimeInSeconds / 3600);
-		machineTimeInSeconds  = machineTimeInSeconds % 3600;
-		var machineTimeMinutes = Math.floor(machineTimeInSeconds / 60);
-		var machineTimeSeconds = Math.floor(machineTimeInSeconds % 60);
-		var machineTimeText = "  Machining time : ";
-		if (machineTimeHours > 0)
-			{
-			machineTimeText = machineTimeText + machineTimeHours + " hours " + machineTimeMinutes + " min ";
-			}
-		else if (machineTimeMinutes > 0)
-			{
-			machineTimeText = machineTimeText + machineTimeMinutes + " min ";
-			}
-		machineTimeText = machineTimeText + machineTimeSeconds + " sec";
-		writeComment(machineTimeText);
-		}
-	writeln("");
-
-	writeBlock(gAbsIncModal.format(90), gFeedModeModal.format(94));
-	writeBlock(gPlaneModal.format(17));
-	switch (unit)
-		{
-		case IN:
-			writeBlock(gUnitModal.format(20));
-			break;
-		case MM:
-			writeBlock(gUnitModal.format(21));
-			break;
-		}
-
-	writeln("");
 	}
+	
+	numberOfSections = getNumberOfSections();
+	writeHeader(0);
+   
+}
 
 function onComment(message)
 	{
@@ -333,7 +417,17 @@ function onSection()
 	var nmbrOfSections = getNumberOfSections();		// how many operations are there in total
 	var sectionId = getCurrentSectionId();			// what is the number of this operation (starts from 0)
 	var section = getSection(sectionId);			// what is the section-object for this operation
+	var tool = section.getTool();
 
+   if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
+      {		
+		sequenceNumber ++;		
+		var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
+  	   var path = FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(sequenceNumber) + "of" + filesToGenerate + ".nc");
+		redirectToFile(path);
+		writeHeader(getCurrentSectionId());		
+      } 	
+   
 	// Insert a small comment section to identify the related G-Code in a large multi-operations file
 	var comment = "Operation " + (sectionId + 1) + " of " + nmbrOfSections;
 	if (hasParameter("operation-comment"))
@@ -346,7 +440,7 @@ function onSection()
 	// To be safe (after jogging to whatever position), move the spindle up to a safe home position before going to the initial position
 	// At end of a section, spindle is retracted to clearance height, so it is only needed on the first section
 	// it is done with G53 - machine coordinates, so I put it in front of anything else
-	if(isFirstSection())
+	if (isFirstSection())
 		{
 		writeBlock(gAbsIncModal.format(90));	// Set to absolute coordinates
 		if (isMilling())
@@ -354,6 +448,15 @@ function onSection()
 			writeBlock(gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(properties.machineHomeZ));	// Retract spindle to Machine Z Home
 			}
 		}
+   else 
+      if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
+         {
+		   writeBlock(gFormat.format(90));	// Set to absolute coordinates
+         if (isMilling()) 
+            {
+			   writeBlock(gFormat.format(53), gFormat.format(0), "Z" + xyzFormat.format(properties.machineHomeZ));	// Retract spindle to Machine Z Home
+		      }
+	      }
 
 	// Write the WCS, ie. G54 or higher.. default to WCS1 / G54 if no or invalid WCS in order to prevent using Machine Coordinates G53
 	if ((section.workOffset < 1) || (section.workOffset > 6))
@@ -367,7 +470,7 @@ function onSection()
 	   writeBlock(gFormat.format(53 + section.workOffset));  // use the selected WCS
       }
 
-	var tool = section.getTool();
+	//var tool = section.getTool();
 
 	// Insert the Spindle start command
 	if (tool.clockwise)
@@ -386,7 +489,7 @@ function onSection()
 		}
 
 	// Wait some time for spindle to speed up - only on first section, as spindle is not powered down in-between sections
-	if(isFirstSection())
+	if (isFirstSection())
 		{
 		onDwell(properties.spindleOnOffDelay);
 		}
@@ -539,9 +642,20 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 
 function onSectionEnd()
 	{
-	// writeBlock(gPlaneModal.format(17));
-	forceAny();
 	writeln("");
+	// writeBlock(gPlaneModal.format(17));
+	if (isRedirecting())	
+	{
+		if (!isLastSection() && properties.generateMultiple && (tool.number != getNextSection().getTool().number) || (isLastSection() && !isFirstSection()))
+		{
+			writeln("");
+			onClose();
+			closeRedirection();			
+		}
+	} 
+
+	forceAny();
+		
 	}
 
 function onClose()
@@ -571,5 +685,13 @@ function onClose()
 	writeln("%");							// EndOfFile marker
 	}
 
+function onTerminate()
+{
+	//The idea here was to rename the first file to <filename>.001ofX.nc so that when multiple files were generated, they all had the same naming conventionl
+	//While this does work, the auto load into Brackets loads a log file instead of the gcode file.
+
+	//var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
+	//FileSystem.moveFile(getOutputPath(), FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(1) + "of" + filesToGenerate + ".nc"));
+}
 
 
