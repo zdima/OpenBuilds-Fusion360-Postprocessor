@@ -22,13 +22,17 @@ This post-Processor should work on GRBL-based machines such as
 16 Mar 2019 - V11 : from sharmstr : Added rounding of tool length to 2 decimals.  Added check for machine config in setup. 
 										Changed RPM warning so it includes operation. Added multiple .nc file generation for tool changes.
 										Added check for duplicate tool numbers with different geometry.
+17 Apr 2019 - V12 : from sharmstr - Added check for minimum  feed rate.  Added file names to header when multiple are generated
+										Added a descriptive title to gotoMCSatend to better explain what it does. Moved machine vendor, model and control to user properties
+
+15 Aug 2019 - V13 : from sharmstr - Grouped properties for clarity
 */
 
-description = "Openbuilds Grbl V11";
-vendor = "Openbuilds";
+description = "Openbuilds Grbl V13 Blackbox,xPro";
+vendor = "Openbuilds and the Swarfer";
 vendorUrl = "http://openbuilds.com";
 model = "GRBL";
-description = "Open Hardware CNC Router V11 using GRBL";
+description = "Open Hardware CNC Router V13 using GRBL";
 legal = "Copyright (C) 2012-2019 by Autodesk, Inc.";
 certificationLevel = 2;
 
@@ -45,7 +49,7 @@ minimumCircularSweep = toRad(0.1); // was 0.01
 maximumCircularSweep = toRad(180);
 allowHelicalMoves = true;
 allowedCircularPlanes = (1 << PLANE_XY);// | (1 << PLANE_ZX) | (1 << PLANE_YZ); // only XY, ZX, and YZ planes
-// the above circular plane limitation appears to be a solution to the faulty arcs problem 
+// the above circular plane limitation appears to be a solution to the faulty arcs problem (but is not entirely)
 // an alternative is to set EITHER minimumChordLength OR minimumCircularRadius to a much larger value, like 0.5mm
 
 var GRBLunits = MM;										// GRBL controller set to mm (Metric). Allows for a consistency check between GRBL settings and CAM file output
@@ -63,36 +67,133 @@ properties =
 	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
 	machineHomeX : -10,
 	machineHomeY : -10,
-   gotoMCSatend : false             // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
-	};
-
+   gotoMCSatend : false,            // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
+ 	machineVendor : "OpenBuilds",
+	machineModel : "OX,Workbee,Sphinx,Lead",
+	machineControl : "BlackBox GRBL V1.1",
+	_Section1: "******",    // used to break up properties into sections for clarity
+	_Section2: "******",
+  _Section3: "******",
+  _Section4: "******"                             
+};  
 // user-defined property definitions
 propertyDefinitions = {
+	_Section1: {
+		title:"--- MACHINE INFO ---",
+		description:"Informational only. Not used for any computation.",
+		type:"string",
+		group: 1
+	},
+	machineVendor: {
+		title:"Machine Vendor", 
+		description: "Machine vendor defined here will be displayed in header if machine config not set.",
+		type:"string",
+		group: 1
+	},
+	machineModel: {
+		title:"Machine Model", 
+		description: "Machine model defined here will be displayed in header if machine config not set.",
+		type:"string",
+		group: 1
+	},
+	machineControl: {
+		title:"Machine Control", 
+		description: "Machine control defined here will be displayed in header if machine config not set.",
+		type:"string",
+		group: 1
+  },
+  _Section2: {
+		title:"--- SPINDLE INFO ---",
+		description:"Informational only. Not used for any computation.",
+		type:"string",
+		group: 2
+	},
 	routerType:  {
-		title: "Spindle type",
-		description: "Select the type of spindle you have",
+		title: "Spindle/Router type",
+		description: "Select the type of spindle you have.",
 		type: "enum",
+      group: 2,     
 		values:[
 		  {title:"Other", id:"other"},
 		  {title:"Makita RT0700", id:"Makita"},
 		  {title:"Dewalt 611", id:"Dewalt"}
 		]
-	  },
+	},
 	speedDial:  {
 		title: "Has Speed Dial",
 		description: "Does your router have a speed dial?",
 		type: "boolean",
-		},
-	generateMultiple: {title:"Muliple Files", description: "Generate multiple files. One for each tool change.", type:"boolean"},
+		group: 2
+  },
+  spindleTwoDirections:  {
+		title: "Spindle can rotate clockwise and counterclockwise?",
+		description:  "Yes : spindle can rotate clockwise and counterclockwise, will send M3 and M4. No : spindle can only go clockwise, will only send M3",
+		type: "boolean",
+		group: 2
+  },
+  spindleOnOffDelay:  {
+  	title: "Spindle on/off delay",
+  	description: "Time (in seconds) the spindle needs to get up to speed or stop",
+  	type: "number",
+  	group: 2
+  },
+  hasCoolant:  {
+  	title: "Has coolant?",
+    description: "Yes: machine uses the coolant output, M8 M9 will be sent. No : coolant output not connected, so no M8 M9 will be sent",
+    type: "boolean",
+    group: 3
+   },      
+  _Section3: {
+		title:"--- TOOL CHANGE HANDLING ---",
+		description:"Informational only. Not used for any computation.",
+		type:"string",
+		group: 4
+	},    
+	generateMultiple: {
+		title:"Generate muliple files for tool changes?", 
+		description: "Generate multiple files. One for each tool change.", 
+		type:"boolean",
+		group: 4
+  },
+  _Section4: {
+		title:"--- END OF JOB COORDIATES ---",
+		description:"Informational only. Not used for any computation.",
+		type:"string",
+		group: 5
+	},
+	gotoMCSatend: {
+		title:"Use Machine Coordinates (G53) at end of job?", 
+		description: "Yes will do G53 G0 x{machinehomeX} y(machinehomeY) (Machine Coordinates), No will do G0 x(machinehomeX) y(machinehomeY) (Work Coordinates) at end of program",
+		type:"boolean",
+		group: 5
+	},
+	machineHomeX: {
+		title:"End of job X position.", 
+		description: "(G53 or G54) X position to move to",
+		type:"number",
+		group: 6
+	},
+	machineHomeY: {
+		title:"End of job Y position.", 
+		description: "(G53 or G54) Y position to move to.",
+		type:"number",
+		group: 6
+	},
+	machineHomeZ: {
+		title:"End of job Z position (MCS Only)", 
+		description: "G53 Z position to move to.",
+		type:"number",
+		group: 6
+	}
 };
 
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
 var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
 
-var xyzFormat = createFormat({decimals:(unit == MM ? 5 : 6)});
+var xyzFormat = createFormat({decimals:(unit == MM ? 3 : 4)});
 var abcFormat = createFormat({decimals:3, forceDecimal:true, scale:DEG});
-//var arcFormat = createFormat({decimals:(unit == MM ? 5 : 6)});    // uses extra digit in arcs - not always effective, just set them the same
+var arcFormat = createFormat({decimals:(unit == MM ? 3 : 4)});    // uses extra digit in arcs - not always effective, just set them the same
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
 var secFormat = createFormat({decimals:1, forceDecimal:true});
@@ -100,18 +201,18 @@ var taperFormat = createFormat({decimals:1, scale:DEG});
 
 var xOutput = createVariable({prefix:"X", force:true}, xyzFormat);
 var yOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
-var zOutput = createVariable({prefix:"Z", force:true}, xyzFormat);
+var zOutput = createVariable({prefix:"Z", force:false}, xyzFormat); // dont need Z every time
 var feedOutput = createVariable({prefix:"F"}, feedFormat);
 var sOutput = createVariable({prefix:"S", force:true}, rpmFormat);
 
 // for arcs, use extra digit (not used anymore from jan 2018)
-var xaOutput = createVariable({prefix:"X", force:true}, xyzFormat);
-var yaOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
-var zaOutput = createVariable({prefix:"Z", force:true}, xyzFormat);
+var xaOutput = createVariable({prefix:"X", force:true}, arcFormat);
+var yaOutput = createVariable({prefix:"Y", force:true}, arcFormat);
+var zaOutput = createVariable({prefix:"Z", force:true}, arcFormat);
 
-var iOutput = createReferenceVariable({prefix:"I", force:true}, xyzFormat);
-var jOutput = createReferenceVariable({prefix:"J", force:true}, xyzFormat);
-var kOutput = createReferenceVariable({prefix:"K", force:true}, xyzFormat);
+var iOutput = createReferenceVariable({prefix:"I", force:true}, arcFormat);
+var jOutput = createReferenceVariable({prefix:"J", force:true}, arcFormat);
+var kOutput = createReferenceVariable({prefix:"K", force:true}, arcFormat);
 
 var gMotionModal = createModal({}, gFormat); 											// modal group 1 // G0-G3, ...
 var gPlaneModal = createModal({onchange:function () {gMotionModal.reset();}}, gFormat); // modal group 2 // G17-19
@@ -122,7 +223,8 @@ var gUnitModal = createModal({}, gFormat); 												// modal group 6 // G20-2
 var sequenceNumber = 1;        //used for multiple file naming
 var multipleToolError = false; //used for alerting during single file generation with multiple tools
 var filesToGenerate = 1;       //used to figure out how many files will be generated so we can diplay in header
-
+var minimumFeedRate = 45;
+var fileIndexFormat = createFormat({width:2, zeropad: true, decimals:0});
 function toTitleCase(str)
 	{
 	// function to reformat a string to 'title case'
@@ -171,6 +273,50 @@ function rpm2dial(rpm, op)
 	return 0;
 	}
 
+function checkMinFeedrate(section, op) 
+{
+	var alertMsg = "";
+	if(section.getParameter("operation:tool_feedCutting") < minimumFeedRate)
+	{		
+		var alertMsg = "Cutting\n";
+		//alert("Warning", "The cutting feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+	}
+
+	if(section.getParameter("operation:tool_feedRetract") < minimumFeedRate)
+	{		
+		var alertMsg = alertMsg + "Retract\n";
+		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+	}
+
+	if(section.getParameter("operation:tool_feedEntry") < minimumFeedRate)
+	{		
+		var alertMsg = alertMsg + "Entry\n";
+		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+	}
+
+	if(section.getParameter("operation:tool_feedExit") < minimumFeedRate)
+	{		
+		var alertMsg = alertMsg + "Exit\n";
+		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+	}
+
+	if(section.getParameter("operation:tool_feedRamp") < minimumFeedRate)
+	{		
+		var alertMsg = alertMsg + "Ramp\n";
+		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+	}
+
+	if(section.getParameter("operation:tool_feedPlunge") < minimumFeedRate)
+	{		
+		var alertMsg = alertMsg + "Plunge\n";
+		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+	}
+		
+	if (alertMsg != "")
+	{
+		alert("Warning", "The following feedrates in " + op + "  are set below the minimum feedrate that grbl supports.  The feedrate should be higher than " + minimumFeedRate + "mm per min.\n\n" + alertMsg);
+	}		
+}	
 function writeBlock()
 	{
 	writeWords(arguments);
@@ -202,9 +348,9 @@ function myMachineConfig() {
 		myMachine.setToolChanger(false);
 		myMachine.setNumberOfTools(1);
 		myMachine.setNumberOfWorkOffsets(6);
-		myMachine.setVendor("OpenBuilds");
-		myMachine.setModel("GRBL Controller");
-		myMachine.setControl("GRBL V1.1");
+		myMachine.setVendor(properties.machineVendor);
+		myMachine.setModel(properties.machineModel);
+		myMachine.setControl(properties.machineControl);
 	}
 }
 
@@ -241,6 +387,14 @@ function writeHeader(secID)
 
     if (properties.generateMultiple) {
         writeComment(numberOfSections + " Operation" + ((numberOfSections == 1) ? "" : "s") + " in "+ filesToGenerate + " files.");
+				writeComment("File List:");
+				writeComment("  " +  FileSystem.getFilename(getOutputPath()));
+				for (var i = 0; i < filesToGenerate-1; ++i) {
+						filenamePath = FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(i+2) + "of" + filesToGenerate + ".nc");
+						filename = FileSystem.getFilename(filenamePath);
+						writeComment("  " + filename);
+				}
+				writeln("");
         writeComment("This is file: " + sequenceNumber + " of " + filesToGenerate);
         writeln("");
         writeComment("This file contains the following operations: ");
@@ -269,6 +423,7 @@ function writeHeader(secID)
 		} else {
 			writeComment("  Spindle : RPM = " + rpm);
 		}
+		checkMinFeedrate(section, op);
 		var machineTimeInSeconds = section.getCycleTime();
 		var machineTimeHours = Math.floor(machineTimeInSeconds / 3600);
 		machineTimeInSeconds = machineTimeInSeconds % 3600;
@@ -422,7 +577,7 @@ function onSection()
    if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
       {		
 		sequenceNumber ++;		
-		var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
+		//var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
   	   var path = FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(sequenceNumber) + "of" + filesToGenerate + ".nc");
 		redirectToFile(path);
 		writeHeader(getCurrentSectionId());		
