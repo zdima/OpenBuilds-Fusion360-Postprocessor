@@ -1,7 +1,7 @@
 /*
 
 Custom Post-Processor for GRBL based Openbuilds-style CNC machines
-Using Exiting Post Processors as inspiration
+Using Existing Post Processors as inspiration
 For documentation, see GitHub Wiki : https://github.com/Strooom/GRBL-Post-Processor/wiki
 This post-Processor should work on GRBL-based machines such as
 * Openbuilds - OX, C-Beam, Workbee, LEAD and other GRBL based mills
@@ -26,14 +26,14 @@ This post-Processor should work on GRBL-based machines such as
 										Added a descriptive title to gotoMCSatend to better explain what it does. Moved machine vendor, model and control to user properties
 
 15 Aug 2019 - V13 : from sharmstr - Grouped properties for clarity
+5 June 2020 - V14 : description and comment changes
 */
 
-description = "Openbuilds Grbl V13 Blackbox,xPro";
+description = "swarfers Openbuilds GRBL-1.1 post V14 for Blackbox,xPro etc";
 vendor = "Openbuilds and the Swarfer";
 vendorUrl = "http://openbuilds.com";
 model = "GRBL";
-description = "Open Hardware CNC Router V13 using GRBL";
-legal = "Copyright (C) 2012-2019 by Autodesk, Inc.";
+legal = "Copyright (C) 2012-2019 by Autodesk, Inc., & the Swarfer 2020";
 certificationLevel = 2;
 
 extension = "nc";										// file extension of the gcode file
@@ -70,7 +70,7 @@ properties =
    gotoMCSatend : false,            // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
  	machineVendor : "OpenBuilds",
 	machineModel : "OX,Workbee,Sphinx,Lead",
-	machineControl : "BlackBox GRBL V1.1",
+	machineControl : "GRBL V1.1",
 	_Section1: "******",    // used to break up properties into sections for clarity
 	_Section2: "******",
   _Section3: "******",
@@ -373,7 +373,8 @@ function writeHeader(secID)
     
    var productName = getProduct();
 	writeComment("Made in : " + productName);
-	writeComment("G-Code optimized for " + myMachine.getVendor() + " " + myMachine.getModel() + " with " + myMachine.getControl() + " controller");
+	writeComment("G-Code optimized for " + myMachine.getControl() + " controller");
+	writeComment(description );
 
 	writeln("");
 
