@@ -27,9 +27,10 @@ This post-Processor should work on GRBL-based machines such as
 
 15 Aug 2019 - V13 : from sharmstr - Grouped properties for clarity
 5 June 2020 - V14 : description and comment changes
+9 June 2020 - V15 : remove limitation to MM units - will produce inch output but user must note that machinehomeX/Y/Z values are always MILLIMETERS
 */
 
-description = "swarfers Openbuilds GRBL-1.1 post V14 for Blackbox,xPro etc";
+description = "swarfers Openbuilds GRBL-1.1 post V15 for Blackbox,xPro etc";
 vendor = "Openbuilds and the Swarfer";
 vendorUrl = "http://openbuilds.com";
 model = "GRBL";
@@ -65,7 +66,7 @@ properties =
 	speedDial: false, // true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
 	generateMultiple: true,          // specifies if a file should be generated for each tool change
 	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
-	machineHomeX : -10,
+	machineHomeX : -10,	            // always in millimeters
 	machineHomeY : -10,
    gotoMCSatend : false,            // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
  	machineVendor : "OpenBuilds",
@@ -168,21 +169,21 @@ propertyDefinitions = {
 		group: 5
 	},
 	machineHomeX: {
-		title:"End of job X position.", 
-		description: "(G53 or G54) X position to move to",
-		type:"number",
+		title:"End of job X position (MM).", 
+		description: "(G53 or G54) X position to move to in Millimeters",
+		type:"spatial",
 		group: 6
 	},
 	machineHomeY: {
-		title:"End of job Y position.", 
-		description: "(G53 or G54) Y position to move to.",
-		type:"number",
+		title:"End of job Y position (MM).", 
+		description: "(G53 or G54) Y position to move to in Millimeters.",
+		type:"spatial",
 		group: 6
 	},
 	machineHomeZ: {
-		title:"End of job Z position (MCS Only)", 
-		description: "G53 Z position to move to.",
-		type:"number",
+		title:"End of job Z position (MCS Only) (MM)", 
+		description: "G53 Z position to move to in Millimeters.",
+		type:"spatial",
 		group: 6
 	}
 };
@@ -193,7 +194,7 @@ var mFormat = createFormat({prefix:"M", decimals:0});
 
 var xyzFormat = createFormat({decimals:(unit == MM ? 3 : 4)});
 var abcFormat = createFormat({decimals:3, forceDecimal:true, scale:DEG});
-var arcFormat = createFormat({decimals:(unit == MM ? 3 : 4)});    // uses extra digit in arcs - not always effective, just set them the same
+var arcFormat = createFormat({decimals:(unit == MM ? 3 : 4)});   
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
 var secFormat = createFormat({decimals:1, forceDecimal:true});
@@ -204,6 +205,7 @@ var yOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
 var zOutput = createVariable({prefix:"Z", force:false}, xyzFormat); // dont need Z every time
 var feedOutput = createVariable({prefix:"F"}, feedFormat);
 var sOutput = createVariable({prefix:"S", force:true}, rpmFormat);
+var mOutput = createVariable({force:true}, mFormat);
 
 // for arcs, use extra digit (not used anymore from jan 2018)
 var xaOutput = createVariable({prefix:"X", force:true}, arcFormat);
@@ -223,7 +225,7 @@ var gUnitModal = createModal({}, gFormat); 												// modal group 6 // G20-2
 var sequenceNumber = 1;        //used for multiple file naming
 var multipleToolError = false; //used for alerting during single file generation with multiple tools
 var filesToGenerate = 1;       //used to figure out how many files will be generated so we can diplay in header
-var minimumFeedRate = 45;
+var minimumFeedRate = toPreciseUnit(45,MM);
 var fileIndexFormat = createFormat({width:2, zeropad: true, decimals:0});
 function toTitleCase(str)
 	{
@@ -313,10 +315,13 @@ function checkMinFeedrate(section, op)
 	}
 		
 	if (alertMsg != "")
-	{
-		alert("Warning", "The following feedrates in " + op + "  are set below the minimum feedrate that grbl supports.  The feedrate should be higher than " + minimumFeedRate + "mm per min.\n\n" + alertMsg);
-	}		
+   	{
+		var fF = createFormat({decimals:0, suffix:(unit == MM ? "mm" : "in" )});
+      var fo = createVariable({}, fF);		
+		alert("Warning", "The following feedrates in " + op + "  are set below the minimum feedrate that grbl supports.  The feedrate should be higher than " + fo.format(minimumFeedRate) + " per minute.\n\n" + alertMsg);
+	   }		
 }	
+
 function writeBlock()
 	{
 	writeWords(arguments);
@@ -484,8 +489,11 @@ function onOpen()
 	// Number of checks capturing fatal errors
 	// 1. is CAD file in same units as our GRBL configuration ?
    // swarfer : GRBL obeys G20/21 so we should only need to output the correct code for the numbers we are outputting, I will look at this later
+	
 	if (unit != GRBLunits)
 		{
+		writeComment("Document unit = " + unit); 
+		/*	
 		if (GRBLunits == MM)
 			{
 			alert("Error", "GRBL configured to mm - CAD file sends Inches! - Change units in CAD/CAM software to mm");
@@ -496,8 +504,9 @@ function onOpen()
 			alert("Error", "GRBL configured to inches - CAD file sends mm! - Change units in CAD/CAM software to inches");
 			error("Fatal Error : units mismatch between CADfile and GRBL setting");
 			}
+		*/	
 		}
-
+    
 	// 2. is RadiusCompensation not set incorrectly ?
 	onRadiusCompensation();
 
@@ -544,7 +553,7 @@ function onOpen()
 	
 	numberOfSections = getNumberOfSections();
 	writeHeader(0);
-   
+   gMotionModal.reset();
 }
 
 function onComment(message)
@@ -601,7 +610,8 @@ function onSection()
 		writeBlock(gAbsIncModal.format(90));	// Set to absolute coordinates
 		if (isMilling())
 			{
-			writeBlock(gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(properties.machineHomeZ));	// Retract spindle to Machine Z Home
+			writeBlock(gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(toPreciseUnit( properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
+			gMotionModal.reset();
 			}
 		}
    else 
@@ -610,14 +620,14 @@ function onSection()
 		   writeBlock(gFormat.format(90));	// Set to absolute coordinates
          if (isMilling()) 
             {
-			   writeBlock(gFormat.format(53), gFormat.format(0), "Z" + xyzFormat.format(properties.machineHomeZ));	// Retract spindle to Machine Z Home
+			   writeBlock(gFormat.format(53), gFormat.format(0), "Z" + xyzFormat.format(toPreciseUnit(properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
 		      }
 	      }
 
 	// Write the WCS, ie. G54 or higher.. default to WCS1 / G54 if no or invalid WCS in order to prevent using Machine Coordinates G53
 	if ((section.workOffset < 1) || (section.workOffset > 6))
 		{
-		alert("Warning", "Invalid Work Coordinate System. Select WCS 1..6 in CAM software. Selecting default WCS1/G54");
+		alert("Warning", "Invalid Work Coordinate System. Select WCS 1..6 in SETUP:PostProcess tab. Selecting default WCS1/G54");
 		//section.workOffset = 1;	// If no WCS is set (or out of range), then default to WCS1 / G54 : swarfer: this appears to be readonly
       writeBlock(gFormat.format(54));  // output what we want, G54
 		}
@@ -631,11 +641,11 @@ function onSection()
 	// Insert the Spindle start command
 	if (tool.clockwise)
 		{
-		writeBlock(sOutput.format(tool.spindleRPM), mFormat.format(3));
+		writeBlock(sOutput.format(tool.spindleRPM), mOutput.format(3));
 		}
 	else if (properties.spindleTwoDirections)
 		{
-		writeBlock(sOutput.format(tool.spindleRPM), mFormat.format(4));
+		writeBlock(sOutput.format(tool.spindleRPM), mOutput.format(4));
 		}
 	else
 		{
@@ -643,7 +653,7 @@ function onSection()
 		error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
 		return;
 		}
-
+   
 	// Wait some time for spindle to speed up - only on first section, as spindle is not powered down in-between sections
 	if (isFirstSection())
 		{
@@ -689,6 +699,7 @@ function onDwell(seconds)
 function onSpindleSpeed(spindleSpeed)
 	{
 	writeBlock(sOutput.format(spindleSpeed));
+	gMotionModal.reset(); // force a G word after a spindle speed change
 	}
 
 function onRadiusCompensation()
@@ -820,7 +831,7 @@ function onClose()
 	if (isMilling())
 		{
       gMotionModal.reset();  // for ease of reading the code always output the G0 words
-		writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(properties.machineHomeZ));	// Retract spindle to Machine Z Home
+		writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(toPreciseUnit(properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
 		}
 	writeBlock(mFormat.format(5));																					// Stop Spindle
 	if (properties.hasCoolant)
@@ -831,11 +842,15 @@ function onClose()
    gMotionModal.reset();
 	if (properties.gotoMCSatend)
       {  // go to MCS home
-      writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "X" + xyzFormat.format(properties.machineHomeX), "Y" + xyzFormat.format(properties.machineHomeY));	// Return to home position
+      writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), 
+		      "X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
+				"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	// Return to home position
       }
    else
       {  // go to WCS home
-      writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), "X" + xyzFormat.format(properties.machineHomeX), "Y" + xyzFormat.format(properties.machineHomeY));	
+      writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), 
+		      "X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
+				"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	
       }
 	writeBlock(mFormat.format(30));  // Program End
 	writeln("%");							// EndOfFile marker
