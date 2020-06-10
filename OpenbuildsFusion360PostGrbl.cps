@@ -1,43 +1,41 @@
 /*
-
 Custom Post-Processor for GRBL based Openbuilds-style CNC machines
-Using Existing Post Processors as inspiration
-For documentation, see GitHub Wiki : https://github.com/Strooom/GRBL-Post-Processor/wiki
-This post-Processor should work on GRBL-based machines such as
-* Openbuilds - OX, C-Beam, Workbee, LEAD and other GRBL based mills
-* Inventables - X-Carve
-* ShapeOko / Carbide3D
-* your spindle is Makita RT0700 or Dewalt 611
+Made possible by
+Swarfer  https://github.com/swarfer/GRBL-Post-Processor
+Sharmstr https://github.com/sharmstr/GRBL-Post-Processor
+Strooom  https://github.com/Strooom/GRBL-Post-Processor
+This post-Processor should work on GRBL-based machines
 
-22/AUG/2016 - V1 : Kick Off
-23/AUG/2016 - V2 : Added Machining Time to Operations overview at file header
-24/AUG/2016 - V3 : Added extra user properties - further cleanup of unused variables
-07/SEP/2016 - V4 : Added support for INCHES. Added a safe retract at beginning of first section
-11/OCT/2016 - V5
-30/JAN/2017 - V6 : Modified capabilities to also allow waterjet, laser-cutting..
-28 Jan 2018 - V7 : swarfered to fix arc errors and add gotoMCSatend option
-16 Feb 2019 - V8 : swarfer , ensure X, Y, Z  output when linear differences are very small
-27 Feb 2019 - V9 : swarfer : found out the correct way to force word output for XYZIJK, see 'force:true' in CreateVariable
-27 Feb 2018 - V10 : from sharmstr : Added user properties for router type. Added rounding of dial settings to 1 decimal.
-16 Mar 2019 - V11 : from sharmstr : Added rounding of tool length to 2 decimals.  Added check for machine config in setup. 
-										Changed RPM warning so it includes operation. Added multiple .nc file generation for tool changes.
-										Added check for duplicate tool numbers with different geometry.
-17 Apr 2019 - V12 : from sharmstr - Added check for minimum  feed rate.  Added file names to header when multiple are generated
-										Added a descriptive title to gotoMCSatend to better explain what it does. Moved machine vendor, model and control to user properties
-
-15 Aug 2019 - V13 : from sharmstr - Grouped properties for clarity
-5 June 2020 - V14 : description and comment changes
-9 June 2020 - V15 : remove limitation to MM units - will produce inch output but user must note that machinehomeX/Y/Z values are always MILLIMETERS
+Changelog
+22/Aug/2016 - V01     : Initial version (Stroom)
+23/Aug/2016 - V02     : Added Machining Time to Operations overview at file header (Stroom)
+24/Aug/2016 - V03     : Added extra user properties - further cleanup of unused variables (Stroom)
+07/Sep/2016 - V04     : Added support for INCHES. Added a safe retract at beginning of first section (Stroom)
+11/Oct/2016 - V05     : Update (Stroom)
+30/Jan/2017 - V06     : Modified capabilities to also allow waterjet, laser-cutting (Stroom)
+28 Jan 2018 - V07     : Fix arc errors and add gotoMCSatend option (Swarfer)
+16 Feb 2019 - V08     : Ensure X, Y, Z  output when linear differences are very small (Swarfer)
+27 Feb 2019 - V09     : Correct way to force word output for XYZIJK, see 'force:true' in CreateVariable (Swarfer)
+27 Feb 2018 - V10     : Added user properties for router type. Added rounding of dial settings to 1 decimal (Sharmstr)
+16 Mar 2019 - V11     : Added rounding of tool length to 2 decimals.  Added check for machine config in setup (Sharmstr)
+					  : Changed RPM warning so it includes operation. Added multiple .nc file generation for tool changes (Sharmstr)
+					  : Added check for duplicate tool numbers with different geometry (Sharmstr)
+17 Apr 2019 - V12     : Added check for minimum  feed rate.  Added file names to header when multiple are generated  (Sharmstr)
+					  : Added a descriptive title to gotoMCSatend to better explain what it does. Moved machine vendor, model and control to user properties  (Sharmstr)
+15 Aug 2019 - V13     : Grouped properties for clarity  (Sharmstr)
+05 Jun 2020 - V14     : description and comment changes (Swarfer)
+09 Jun 2020 - V15     : remove limitation to MM units - will produce inch output but user must note that machinehomeX/Y/Z values are always MILLIMETERS (Swarfer)
+10 Jun 2020 - V1.0.16 : OpenBuilds-Fusion360-Postprocessor, Semantic Versioning, Automatically add router dial if Router type is set (OpenBuilds)
 */
 
-description = "swarfers Openbuilds GRBL-1.1 post V15 for Blackbox,xPro etc";
-vendor = "Openbuilds and the Swarfer";
-vendorUrl = "http://openbuilds.com";
-model = "GRBL";
-legal = "Copyright (C) 2012-2019 by Autodesk, Inc., & the Swarfer 2020";
+description = "OpenBuilds CNC (Grbl/BlackBox)";
+vendor = "OpenBuilds";
+vendorUrl = "https://openbuilds.com";
+model = "Grbl";
+legal = "";
 certificationLevel = 2;
 
-extension = "nc";										// file extension of the gcode file
+extension = "gcode";										// file extension of the gcode file
 setCodePage("ascii");									// character set of the gcode file
 //setEOL(CRLF);											// end-of-line type : use CRLF for windows
 
@@ -58,25 +56,25 @@ var GRBLunits = MM;										// GRBL controller set to mm (Metric). Allows for a
 
 // user-defined properties : defaults are set, but they can be changed from a dialog box in Fusion when doing a post.
 properties =
-	{
-	spindleOnOffDelay: 1.8,				// time (in seconds) the spindle needs to get up to speed or stop
-	spindleTwoDirections : false,		// true : spindle can rotate clockwise and counterclockwise, will send M3 and M4. false : spindle can only go clockwise, will only send M3
-	hasCoolant : false,					// true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
+{
+	spindleOnOffDelay: 1.8,					// time (in seconds) the spindle needs to get up to speed or stop
+	spindleTwoDirections : false,			// true : spindle can rotate clockwise and counterclockwise, will send M3 and M4. false : spindle can only go clockwise, will only send M3
+	hasCoolant : false,						// true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
 	routerType : "Other",	
-	speedDial: false, // true : the spindle is of type Makite RT0700, Dewalt 611 with a Dial to set speeds 1-6. false : other spindle
-	generateMultiple: true,          // specifies if a file should be generated for each tool change
-	machineHomeZ : -10,					// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
-	machineHomeX : -10,	            // always in millimeters
+	generateMultiple: true,          		// specifies if a file should be generated for each tool change
+	machineHomeZ : -10,						// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
+	machineHomeX : -10,	            		// always in millimeters
 	machineHomeY : -10,
-   gotoMCSatend : false,            // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
+    gotoMCSatend : false,            		// true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
  	machineVendor : "OpenBuilds",
-	machineModel : "OX,Workbee,Sphinx,Lead",
-	machineControl : "GRBL V1.1",
-	_Section1: "******",    // used to break up properties into sections for clarity
-	_Section2: "******",
-  _Section3: "******",
-  _Section4: "******"                             
+	machineModel : "Generic",
+	machineControl : "Grbl 1.1 / BlackBox",
+	_Section1: "******",    				// used to break up properties into sections for clarity
+	_Section2: "******",					// used to break up properties into sections for clarity
+    _Section3: "******",					// used to break up properties into sections for clarity
+    _Section4: "******" 					// used to break up properties into sections for clarity
 };  
+
 // user-defined property definitions
 propertyDefinitions = {
 	_Section1: {
@@ -102,8 +100,8 @@ propertyDefinitions = {
 		description: "Machine control defined here will be displayed in header if machine config not set.",
 		type:"string",
 		group: 1
-  },
-  _Section2: {
+    },
+    _Section2: {
 		title:"--- SPINDLE INFO ---",
 		description:"Informational only. Not used for any computation.",
 		type:"string",
@@ -120,31 +118,25 @@ propertyDefinitions = {
 		  {title:"Dewalt 611", id:"Dewalt"}
 		]
 	},
-	speedDial:  {
-		title: "Has Speed Dial",
-		description: "Does your router have a speed dial?",
-		type: "boolean",
-		group: 2
-  },
-  spindleTwoDirections:  {
+	spindleTwoDirections:  {
 		title: "Spindle can rotate clockwise and counterclockwise?",
 		description:  "Yes : spindle can rotate clockwise and counterclockwise, will send M3 and M4. No : spindle can only go clockwise, will only send M3",
 		type: "boolean",
 		group: 2
-  },
-  spindleOnOffDelay:  {
-  	title: "Spindle on/off delay",
-  	description: "Time (in seconds) the spindle needs to get up to speed or stop",
-  	type: "number",
-  	group: 2
-  },
-  hasCoolant:  {
-  	title: "Has coolant?",
-    description: "Yes: machine uses the coolant output, M8 M9 will be sent. No : coolant output not connected, so no M8 M9 will be sent",
-    type: "boolean",
-    group: 3
-   },      
-  _Section3: {
+    },
+    spindleOnOffDelay:  {
+  		title: "Spindle on/off delay",
+  		description: "Time (in seconds) the spindle needs to get up to speed or stop",
+  		type: "number",
+  		group: 2
+    },
+    hasCoolant:  {
+  		title: "Has coolant?",
+    	description: "Yes: machine uses the coolant output, M8 M9 will be sent. No : coolant output not connected, so no M8 M9 will be sent",
+    	type: "boolean",
+    	group: 3
+    },      
+    _Section3: {
 		title:"--- TOOL CHANGE HANDLING ---",
 		description:"Informational only. Not used for any computation.",
 		type:"string",
@@ -155,9 +147,9 @@ propertyDefinitions = {
 		description: "Generate multiple files. One for each tool change.", 
 		type:"boolean",
 		group: 4
-  },
-  _Section4: {
-		title:"--- END OF JOB COORDIATES ---",
+    },
+    _Section4: {
+		title:"--- END OF JOB COORDINATES ---",
 		description:"Informational only. Not used for any computation.",
 		type:"string",
 		group: 5
@@ -227,14 +219,13 @@ var multipleToolError = false; //used for alerting during single file generation
 var filesToGenerate = 1;       //used to figure out how many files will be generated so we can diplay in header
 var minimumFeedRate = toPreciseUnit(45,MM);
 var fileIndexFormat = createFormat({width:2, zeropad: true, decimals:0});
-function toTitleCase(str)
-	{
+
+function toTitleCase(str) {
 	// function to reformat a string to 'title case'
-	return str.replace(/\w\S*/g, function(txt)
-		{
+	return str.replace(/\w\S*/g, function(txt) {
 		return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
-		});
-	}
+	});
+}
 
 function rpm2dial(rpm, op)
 	{
@@ -249,83 +240,70 @@ function rpm2dial(rpm, op)
 	} else {
 		var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
 	}
-	if (rpm < speeds[1])
-		{
+	if (rpm < speeds[1]) {
 		alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.");
 		return 1;
-		}
+	}
 
-	if (rpm > speeds[speeds.length - 1])
-		{
+	if (rpm > speeds[speeds.length - 1]) {
 		alert("Warning", rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm in the " + op + " operation.");
 		return (speeds.length - 1);
-		}
+	}
 
 	var i;
-	for (i=1; i < (speeds.length-1); i++)
-		{
-		if ((rpm >= speeds[i]) && (rpm <= speeds[i+1]))
-			{
+	for (i=1; i < (speeds.length-1); i++) {
+		if ((rpm >= speeds[i]) && (rpm <= speeds[i+1])) {
 			return (((rpm - speeds[i]) / (speeds[i+1] - speeds[i])) + i).toFixed(1);
-			}
 		}
+	}
 
 	alert("Error", "Error in calculating router speed dial..");
 	error("Fatal Error calculating router speed dial");
 	return 0;
 	}
 
-function checkMinFeedrate(section, op) 
-{
+function checkMinFeedrate(section, op) {
 	var alertMsg = "";
-	if(section.getParameter("operation:tool_feedCutting") < minimumFeedRate)
-	{		
+	if(section.getParameter("operation:tool_feedCutting") < minimumFeedRate) {		
 		var alertMsg = "Cutting\n";
 		//alert("Warning", "The cutting feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedRetract") < minimumFeedRate)
-	{		
+	if(section.getParameter("operation:tool_feedRetract") < minimumFeedRate) {		
 		var alertMsg = alertMsg + "Retract\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedEntry") < minimumFeedRate)
-	{		
+	if(section.getParameter("operation:tool_feedEntry") < minimumFeedRate) {		
 		var alertMsg = alertMsg + "Entry\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedExit") < minimumFeedRate)
-	{		
+	if(section.getParameter("operation:tool_feedExit") < minimumFeedRate) {		
 		var alertMsg = alertMsg + "Exit\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedRamp") < minimumFeedRate)
-	{		
+	if(section.getParameter("operation:tool_feedRamp") < minimumFeedRate) {		
 		var alertMsg = alertMsg + "Ramp\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedPlunge") < minimumFeedRate)
-	{		
+	if(section.getParameter("operation:tool_feedPlunge") < minimumFeedRate) {		
 		var alertMsg = alertMsg + "Plunge\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 		
-	if (alertMsg != "")
-   	{
+	if (alertMsg != "") {
 		var fF = createFormat({decimals:0, suffix:(unit == MM ? "mm" : "in" )});
       var fo = createVariable({}, fF);		
 		alert("Warning", "The following feedrates in " + op + "  are set below the minimum feedrate that grbl supports.  The feedrate should be higher than " + fo.format(minimumFeedRate) + " per minute.\n\n" + alertMsg);
-	   }		
+	}		
 }	
 
-function writeBlock()
-	{
+function writeBlock() {
 	writeWords(arguments);
-	}
+}
 
 /**
 Thanks to nyccnc.com
@@ -359,24 +337,21 @@ function myMachineConfig() {
 	}
 }
 
-function writeComment(text)
-	{
+function writeComment(text) {
 	// Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
 	// In order to make it simple, I replace everything which is not A-Z, 0-9, space, : , .
 	// Finally put everything between () as this is the way GRBL & UGCS expect comments
 	writeln("(" + String(text).replace(/[^a-zA-Z\d :=,.]+/g, " ") + ")");
-	}
+}
 
    
-function writeHeader(secID) 
-{
-	if (multipleToolError)
-      {
+function writeHeader(secID) {
+	if (multipleToolError) {
       writeComment("Warning: Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
       writeln("");
-      }
+    }
     
-   var productName = getProduct();
+    var productName = getProduct();
 	writeComment("Made in : " + productName);
 	writeComment("G-Code optimized for " + myMachine.getControl() + " controller");
 	writeComment(description );
@@ -424,7 +399,7 @@ function writeHeader(secID)
 			writeComment("  Work Coordinate System : G" + (section.workOffset + 53));
 		}
 		writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + "mm, Len = " + tool.fluteLength.toFixed(2) + "mm");
-		if (properties.speedDial) {
+		if (properties.routerType == "Dewalt" || properties.routerType == "Makita") {
 			writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm, op));
 		} else {
 			writeComment("  Spindle : RPM = " + rpm);
@@ -484,8 +459,7 @@ function writeHeader(secID)
 	writeln("");
 }
 
-function onOpen()
-	{
+function onOpen() {
 	// Number of checks capturing fatal errors
 	// 1. is CAD file in same units as our GRBL configuration ?
    // swarfer : GRBL obeys G20/21 so we should only need to output the correct code for the numbers we are outputting, I will look at this later
@@ -556,131 +530,105 @@ function onOpen()
    gMotionModal.reset();
 }
 
-function onComment(message)
-	{
+function onComment(message) {
 	writeComment(message);
-	}
+}
 
-function forceXYZ()
-	{
+function forceXYZ() {
 	xOutput.reset();
 	yOutput.reset();
 	zOutput.reset();
 	xaOutput.reset();
 	yaOutput.reset();
 	zaOutput.reset();
-	}
+}
 
-function forceAny()
-	{
+function forceAny() {
 	forceXYZ();
 	feedOutput.reset();
-	}
+}
 
-function onSection()
-	{
+function onSection() {
 	var nmbrOfSections = getNumberOfSections();		// how many operations are there in total
 	var sectionId = getCurrentSectionId();			// what is the number of this operation (starts from 0)
 	var section = getSection(sectionId);			// what is the section-object for this operation
 	var tool = section.getTool();
 
-   if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
-      {		
+   if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {		
 		sequenceNumber ++;		
 		//var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
   	   var path = FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(sequenceNumber) + "of" + filesToGenerate + ".nc");
 		redirectToFile(path);
 		writeHeader(getCurrentSectionId());		
-      } 	
+    } 	
    
 	// Insert a small comment section to identify the related G-Code in a large multi-operations file
 	var comment = "Operation " + (sectionId + 1) + " of " + nmbrOfSections;
-	if (hasParameter("operation-comment"))
-		{
+	if (hasParameter("operation-comment")) {
 		comment = comment + " : " + getParameter("operation-comment");
-		}
+	}
 	writeComment(comment);
 	writeln("");
 
 	// To be safe (after jogging to whatever position), move the spindle up to a safe home position before going to the initial position
 	// At end of a section, spindle is retracted to clearance height, so it is only needed on the first section
 	// it is done with G53 - machine coordinates, so I put it in front of anything else
-	if (isFirstSection())
-		{
+	if (isFirstSection()) {
 		writeBlock(gAbsIncModal.format(90));	// Set to absolute coordinates
-		if (isMilling())
-			{
+		if (isMilling()) {
 			writeBlock(gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(toPreciseUnit( properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
 			gMotionModal.reset();
-			}
 		}
-   else 
-      if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
-         {
-		   writeBlock(gFormat.format(90));	// Set to absolute coordinates
-         if (isMilling()) 
-            {
-			   writeBlock(gFormat.format(53), gFormat.format(0), "Z" + xyzFormat.format(toPreciseUnit(properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
-		      }
-	      }
+	} else if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {
+		writeBlock(gFormat.format(90));	// Set to absolute coordinates
+        if (isMilling()) {
+			writeBlock(gFormat.format(53), gFormat.format(0), "Z" + xyzFormat.format(toPreciseUnit(properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
+		}
+	}
 
 	// Write the WCS, ie. G54 or higher.. default to WCS1 / G54 if no or invalid WCS in order to prevent using Machine Coordinates G53
-	if ((section.workOffset < 1) || (section.workOffset > 6))
-		{
+	if ((section.workOffset < 1) || (section.workOffset > 6)) {
 		alert("Warning", "Invalid Work Coordinate System. Select WCS 1..6 in SETUP:PostProcess tab. Selecting default WCS1/G54");
 		//section.workOffset = 1;	// If no WCS is set (or out of range), then default to WCS1 / G54 : swarfer: this appears to be readonly
-      writeBlock(gFormat.format(54));  // output what we want, G54
-		}
-   else
-      {
+        writeBlock(gFormat.format(54));  // output what we want, G54
+	} else {
 	   writeBlock(gFormat.format(53 + section.workOffset));  // use the selected WCS
-      }
+    }
 
 	//var tool = section.getTool();
 
 	// Insert the Spindle start command
-	if (tool.clockwise)
-		{
+	if (tool.clockwise) {
 		writeBlock(sOutput.format(tool.spindleRPM), mOutput.format(3));
-		}
-	else if (properties.spindleTwoDirections)
-		{
+	} else if (properties.spindleTwoDirections) {
 		writeBlock(sOutput.format(tool.spindleRPM), mOutput.format(4));
-		}
-	else
-		{
+	} else {
 		alert("Error", "Counter-clockwise Spindle Operation found, but your spindle does not support this");
 		error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
 		return;
-		}
+	}
    
 	// Wait some time for spindle to speed up - only on first section, as spindle is not powered down in-between sections
-	if (isFirstSection())
-		{
+	if (isFirstSection()) {
 		onDwell(properties.spindleOnOffDelay);
-		}
+	}
 
 	// If the machine has coolant, write M8 or M9
-	if (properties.hasCoolant)
-		{
-		if (tool.coolant)
-			{
+	if (properties.hasCoolant) {
+		if (tool.coolant) {
 			writeBlock(mFormat.format(8));
-			}
-		else
-			{
+		} else {
 			writeBlock(mFormat.format(9));
-			}
 		}
+	}
 
 	forceXYZ();
 
 	var remaining = currentSection.workPlane;
-	if (!isSameDirection(remaining.forward, new Vector(0, 0, 1)))
-		{
+	if (!isSameDirection(remaining.forward, new Vector(0, 0, 1))) {
 		alert("Error", "Tool-Rotation detected - GRBL only supports 3 Axis");
 		error("Fatal Error in Operation " + (sectionId + 1) + ": Tool-Rotation detected but GRBL only supports 3 Axis");
-		}
+	}
 	setRotation(remaining);
 
 	forceAny();
@@ -689,92 +637,73 @@ function onSection()
 	var initialPosition = getFramePosition(currentSection.getInitialPosition());
 	writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y));
 	writeBlock(gMotionModal.format(0), zOutput.format(initialPosition.z));
-	}
+}
 
-function onDwell(seconds)
-	{
+function onDwell(seconds) {
 	writeBlock(gFormat.format(4), "P" + secFormat.format(seconds));
-	}
+}
 
-function onSpindleSpeed(spindleSpeed)
-	{
+function onSpindleSpeed(spindleSpeed) {
 	writeBlock(sOutput.format(spindleSpeed));
 	gMotionModal.reset(); // force a G word after a spindle speed change
-	}
+}
 
-function onRadiusCompensation()
-	{
+function onRadiusCompensation() {
 	var radComp = getRadiusCompensation();
 	var sectionId = getCurrentSectionId();
-	if (radComp != RADIUS_COMPENSATION_OFF)
-		{
+	if (radComp != RADIUS_COMPENSATION_OFF) {
 		alert("Error", "RadiusCompensation is not supported in GRBL - Change RadiusCompensation in CAD/CAM software to Off/Center/Computer");
 		error("Fatal Error in Operation " + (sectionId + 1) + ": RadiusCompensation is found in CAD file but is not supported in GRBL");
 		return;
-		}
 	}
+}
 
-function onRapid(_x, _y, _z)
-	{
+function onRapid(_x, _y, _z) {
 	var x = xOutput.format(_x);
 	var y = yOutput.format(_y);
 	var z = zOutput.format(_z);
-	if (x || y || z)
-		{
+	if (x || y || z) {
 		writeBlock(gMotionModal.format(0), x, y, z);
 		feedOutput.reset();
-		}
 	}
+}
 
-function onLinear(_x, _y, _z, feed)
-	{
+function onLinear(_x, _y, _z, feed) {
 	var x = xOutput.format(_x);
 	var y = yOutput.format(_y);
 	var z = zOutput.format(_z);
 	var f = feedOutput.format(feed);
 
-	if (x || y || z)
-		{
+	if (x || y || z) {
 		writeBlock(gMotionModal.format(1), x, y, z, f);
-		}
-	else if (f)
-		{
-		if (getNextRecord().isMotion())
-			{
+	} else if (f) {
+		if (getNextRecord().isMotion()) {
 			feedOutput.reset(); // force feed on next line
-			}
-		else
-			{
+		} else {
 			writeBlock(gMotionModal.format(1), f);
-			}
 		}
 	}
+}
 
-function onRapid5D(_x, _y, _z, _a, _b, _c)
-	{
+function onRapid5D(_x, _y, _z, _a, _b, _c) {
 	alert("Error", "Tool-Rotation detected - GRBL only supports 3 Axis");
 	error("Tool-Rotation detected but GRBL only supports 3 Axis");
-	}
+}
 
-function onLinear5D(_x, _y, _z, _a, _b, _c, feed)
-	{
+function onLinear5D(_x, _y, _z, _a, _b, _c, feed) {
 	alert("Error", "Tool-Rotation detected - GRBL only supports 3 Axis");
 	error("Tool-Rotation detected but GRBL only supports 3 Axis");
-	}
+}
 
-function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
-	{
+function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
 	var start = getCurrentPosition();
 
-	if (isFullCircle())
-		{
-		if (isHelical())
-			{
+	if (isFullCircle()) {
+		if (isHelical()) {
 			linearize(tolerance);
 			return;
-			}
-		switch (getCircularPlane())
-			{
+		}
+		switch (getCircularPlane()) {
 			case PLANE_XY:
 				writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
 				break;
@@ -786,12 +715,9 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 				break;
 			default:
 				linearize(tolerance);
-			}
 		}
-	else
-		{
-      switch (getCircularPlane())
-			{
+	} else {
+      switch (getCircularPlane()) {
 			case PLANE_XY:
 				writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
 				break;
@@ -803,61 +729,49 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
 				break;
 			default:
 				linearize(tolerance);
-			}
 		}
 	}
+}
 
-function onSectionEnd()
-	{
+function onSectionEnd() {
 	writeln("");
 	// writeBlock(gPlaneModal.format(17));
-	if (isRedirecting())	
-	{
-		if (!isLastSection() && properties.generateMultiple && (tool.number != getNextSection().getTool().number) || (isLastSection() && !isFirstSection()))
-		{
+	if (isRedirecting()) {
+		if (!isLastSection() && properties.generateMultiple && (tool.number != getNextSection().getTool().number) || (isLastSection() && !isFirstSection())) {
 			writeln("");
 			onClose();
 			closeRedirection();			
 		}
 	} 
-
 	forceAny();
-		
-	}
+}
 
-function onClose()
-	{
+function onClose() {
 	writeBlock(gAbsIncModal.format(90));	// Set to absolute coordinates for the following moves
-	if (isMilling())
-		{
-      gMotionModal.reset();  // for ease of reading the code always output the G0 words
+	if (isMilling()) {
+        gMotionModal.reset();  // for ease of reading the code always output the G0 words
 		writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(toPreciseUnit(properties.machineHomeZ,MM)));	// Retract spindle to Machine Z Home
-		}
+	}
 	writeBlock(mFormat.format(5));																					// Stop Spindle
-	if (properties.hasCoolant)
-		{
+	if (properties.hasCoolant) {
 		writeBlock(mFormat.format(9));																				// Stop Coolant
-		}
+	}
 	//onDwell(properties.spindleOnOffDelay);																			// Wait for spindle to stop
-   gMotionModal.reset();
-	if (properties.gotoMCSatend)
-      {  // go to MCS home
-      writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), 
-		      "X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
-				"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	// Return to home position
-      }
-   else
-      {  // go to WCS home
-      writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), 
-		      "X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
-				"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	
-      }
+    gMotionModal.reset();
+	if (properties.gotoMCSatend) {  // go to MCS home
+        writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), 
+		"X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
+		"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	// Return to home position
+    } else {  // go to WCS home
+        writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), 
+		"X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
+		"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	
+    }
 	writeBlock(mFormat.format(30));  // Program End
 	writeln("%");							// EndOfFile marker
-	}
+}
 
-function onTerminate()
-{
+function onTerminate() {
 	//The idea here was to rename the first file to <filename>.001ofX.nc so that when multiple files were generated, they all had the same naming conventionl
 	//While this does work, the auto load into Brackets loads a log file instead of the gcode file.
 
