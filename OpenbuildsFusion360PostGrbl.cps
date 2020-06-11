@@ -28,7 +28,7 @@ Changelog
 10 Jun 2020 - V1.0.16 : OpenBuilds-Fusion360-Postprocessor, Semantic Versioning, Automatically add router dial if Router type is set (OpenBuilds)
 */
 
-description = "OpenBuilds CNC (Grbl/BlackBox)";
+description = "OpenBuilds Grbl/BlackBox";
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
 model = "Grbl";
@@ -60,7 +60,7 @@ properties =
 	spindleOnOffDelay: 1.8,					// time (in seconds) the spindle needs to get up to speed or stop
 	spindleTwoDirections : false,			// true : spindle can rotate clockwise and counterclockwise, will send M3 and M4. false : spindle can only go clockwise, will only send M3
 	hasCoolant : false,						// true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
-	routerType : "Other",	
+	routerType : "Other",
 	generateMultiple: true,          		// specifies if a file should be generated for each tool change
 	machineHomeZ : -10,						// absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
 	machineHomeX : -10,	            		// always in millimeters
@@ -73,7 +73,7 @@ properties =
 	_Section2: "******",					// used to break up properties into sections for clarity
     _Section3: "******",					// used to break up properties into sections for clarity
     _Section4: "******" 					// used to break up properties into sections for clarity
-};  
+};
 
 // user-defined property definitions
 propertyDefinitions = {
@@ -84,19 +84,19 @@ propertyDefinitions = {
 		group: 1
 	},
 	machineVendor: {
-		title:"Machine Vendor", 
+		title:"Machine Vendor",
 		description: "Machine vendor defined here will be displayed in header if machine config not set.",
 		type:"string",
 		group: 1
 	},
 	machineModel: {
-		title:"Machine Model", 
+		title:"Machine Model",
 		description: "Machine model defined here will be displayed in header if machine config not set.",
 		type:"string",
 		group: 1
 	},
 	machineControl: {
-		title:"Machine Control", 
+		title:"Machine Control",
 		description: "Machine control defined here will be displayed in header if machine config not set.",
 		type:"string",
 		group: 1
@@ -111,7 +111,7 @@ propertyDefinitions = {
 		title: "Spindle/Router type",
 		description: "Select the type of spindle you have.",
 		type: "enum",
-      group: 2,     
+      group: 2,
 		values:[
 		  {title:"Other", id:"other"},
 		  {title:"Makita RT0700", id:"Makita"},
@@ -135,16 +135,16 @@ propertyDefinitions = {
     	description: "Yes: machine uses the coolant output, M8 M9 will be sent. No : coolant output not connected, so no M8 M9 will be sent",
     	type: "boolean",
     	group: 3
-    },      
+    },
     _Section3: {
 		title:"--- TOOL CHANGE HANDLING ---",
 		description:"Informational only. Not used for any computation.",
 		type:"string",
 		group: 4
-	},    
+	},
 	generateMultiple: {
-		title:"Generate muliple files for tool changes?", 
-		description: "Generate multiple files. One for each tool change.", 
+		title:"Generate muliple files for tool changes?",
+		description: "Generate multiple files. One for each tool change.",
 		type:"boolean",
 		group: 4
     },
@@ -155,25 +155,25 @@ propertyDefinitions = {
 		group: 5
 	},
 	gotoMCSatend: {
-		title:"Use Machine Coordinates (G53) at end of job?", 
+		title:"Use Machine Coordinates (G53) at end of job?",
 		description: "Yes will do G53 G0 x{machinehomeX} y(machinehomeY) (Machine Coordinates), No will do G0 x(machinehomeX) y(machinehomeY) (Work Coordinates) at end of program",
 		type:"boolean",
 		group: 5
 	},
 	machineHomeX: {
-		title:"End of job X position (MM).", 
+		title:"End of job X position (MM).",
 		description: "(G53 or G54) X position to move to in Millimeters",
 		type:"spatial",
 		group: 6
 	},
 	machineHomeY: {
-		title:"End of job Y position (MM).", 
+		title:"End of job Y position (MM).",
 		description: "(G53 or G54) Y position to move to in Millimeters.",
 		type:"spatial",
 		group: 6
 	},
 	machineHomeZ: {
-		title:"End of job Z position (MCS Only) (MM)", 
+		title:"End of job Z position (MCS Only) (MM)",
 		description: "G53 Z position to move to in Millimeters.",
 		type:"spatial",
 		group: 6
@@ -186,7 +186,7 @@ var mFormat = createFormat({prefix:"M", decimals:0});
 
 var xyzFormat = createFormat({decimals:(unit == MM ? 3 : 4)});
 var abcFormat = createFormat({decimals:3, forceDecimal:true, scale:DEG});
-var arcFormat = createFormat({decimals:(unit == MM ? 3 : 4)});   
+var arcFormat = createFormat({decimals:(unit == MM ? 3 : 4)});
 var feedFormat = createFormat({decimals:0});
 var rpmFormat = createFormat({decimals:0});
 var secFormat = createFormat({decimals:1, forceDecimal:true});
@@ -234,7 +234,7 @@ function rpm2dial(rpm, op)
 	// array which maps spindle speeds to router dial settings,
 	// according to Makita RT0700 Manual : 1=10000, 2=12000, 3=17000, 4=22000, 5=27000, 6=30000
 	// according to Dewalt 611 Manual : 1=16000, 2=18200, 3=20400, 4=22600, 5=24800, 6=27000
-	
+
 	if (properties.routerType == "Dewalt"){
 		var speeds = [0, 16000, 18200, 20400, 22600, 24800, 27000];
 	} else {
@@ -264,42 +264,42 @@ function rpm2dial(rpm, op)
 
 function checkMinFeedrate(section, op) {
 	var alertMsg = "";
-	if(section.getParameter("operation:tool_feedCutting") < minimumFeedRate) {		
+	if(section.getParameter("operation:tool_feedCutting") < minimumFeedRate) {
 		var alertMsg = "Cutting\n";
 		//alert("Warning", "The cutting feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedRetract") < minimumFeedRate) {		
+	if(section.getParameter("operation:tool_feedRetract") < minimumFeedRate) {
 		var alertMsg = alertMsg + "Retract\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedEntry") < minimumFeedRate) {		
+	if(section.getParameter("operation:tool_feedEntry") < minimumFeedRate) {
 		var alertMsg = alertMsg + "Entry\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedExit") < minimumFeedRate) {		
+	if(section.getParameter("operation:tool_feedExit") < minimumFeedRate) {
 		var alertMsg = alertMsg + "Exit\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedRamp") < minimumFeedRate) {		
+	if(section.getParameter("operation:tool_feedRamp") < minimumFeedRate) {
 		var alertMsg = alertMsg + "Ramp\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
 
-	if(section.getParameter("operation:tool_feedPlunge") < minimumFeedRate) {		
+	if(section.getParameter("operation:tool_feedPlunge") < minimumFeedRate) {
 		var alertMsg = alertMsg + "Plunge\n";
 		//alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
 	}
-		
+
 	if (alertMsg != "") {
 		var fF = createFormat({decimals:0, suffix:(unit == MM ? "mm" : "in" )});
-      var fo = createVariable({}, fF);		
+      var fo = createVariable({}, fF);
 		alert("Warning", "The following feedrates in " + op + "  are set below the minimum feedrate that grbl supports.  The feedrate should be higher than " + fo.format(minimumFeedRate) + " per minute.\n\n" + alertMsg);
-	}		
-}	
+	}
+}
 
 function writeBlock() {
 	writeWords(arguments);
@@ -307,8 +307,8 @@ function writeBlock() {
 
 /**
 Thanks to nyccnc.com
-Thanks to the Autodesk Knowledge Network for help with this at https://knowledge.autodesk.com/support/hsm/learn-explore/caas/sfdcarticles/sfdcarticles/How-to-use-Manual-NC-options-to-manually-add-code-with-Fusion-360-HSM-CAM.html! 
-*/   
+Thanks to the Autodesk Knowledge Network for help with this at https://knowledge.autodesk.com/support/hsm/learn-explore/caas/sfdcarticles/sfdcarticles/How-to-use-Manual-NC-options-to-manually-add-code-with-Fusion-360-HSM-CAM.html!
+*/
 function onPassThrough(text) {
   var commands = String(text).split(",");
   for (text in commands) {
@@ -344,13 +344,13 @@ function writeComment(text) {
 	writeln("(" + String(text).replace(/[^a-zA-Z\d :=,.]+/g, " ") + ")");
 }
 
-   
+
 function writeHeader(secID) {
 	if (multipleToolError) {
       writeComment("Warning: Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
       writeln("");
     }
-    
+
     var productName = getProduct();
 	writeComment("Made in : " + productName);
 	writeComment("G-Code optimized for " + myMachine.getControl() + " controller");
@@ -382,7 +382,7 @@ function writeHeader(secID) {
     } else {
         writeComment(numberOfSections + " Operation" + ((numberOfSections == 1)?"":"s") + " :");
     }
-    
+
 	for (var i = secID; i < numberOfSections; ++i) {
 		var section = getSection(i);
 		var tool = section.getTool();
@@ -419,7 +419,7 @@ function writeHeader(secID) {
 		}
 		machineTimeText = machineTimeText + machineTimeSeconds + " sec";
         writeComment(machineTimeText);
-        
+
 		if (properties.generateMultiple && (i+1 < numberOfSections)) {
 			if (tool.number != getSection(i+1).getTool().number) {
 				writeln("");
@@ -430,8 +430,8 @@ function writeHeader(secID) {
 	}
 
 	writeln("");
-	
-	
+
+
 	if (isFirstSection()) {
 		writeBlock(gAbsIncModal.format(90), gFeedModeModal.format(94));
 		writeBlock(gPlaneModal.format(17));
@@ -463,11 +463,11 @@ function onOpen() {
 	// Number of checks capturing fatal errors
 	// 1. is CAD file in same units as our GRBL configuration ?
    // swarfer : GRBL obeys G20/21 so we should only need to output the correct code for the numbers we are outputting, I will look at this later
-	
+
 	if (unit != GRBLunits)
 		{
-		writeComment("Document unit = " + unit); 
-		/*	
+		writeComment("Document unit = " + unit);
+		/*
 		if (GRBLunits == MM)
 			{
 			alert("Error", "GRBL configured to mm - CAD file sends Inches! - Change units in CAD/CAM software to mm");
@@ -478,9 +478,9 @@ function onOpen() {
 			alert("Error", "GRBL configured to inches - CAD file sends mm! - Change units in CAD/CAM software to inches");
 			error("Fatal Error : units mismatch between CADfile and GRBL setting");
 			}
-		*/	
+		*/
 		}
-    
+
 	// 2. is RadiusCompensation not set incorrectly ?
 	onRadiusCompensation();
 
@@ -524,7 +524,7 @@ function onOpen() {
 			alert("Warning", "Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
 		}
 	}
-	
+
 	numberOfSections = getNumberOfSections();
 	writeHeader(0);
    gMotionModal.reset();
@@ -554,14 +554,14 @@ function onSection() {
 	var section = getSection(sectionId);			// what is the section-object for this operation
 	var tool = section.getTool();
 
-   if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {		
-		sequenceNumber ++;		
+   if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {
+		sequenceNumber ++;
 		//var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
   	   var path = FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(sequenceNumber) + "of" + filesToGenerate + ".nc");
 		redirectToFile(path);
-		writeHeader(getCurrentSectionId());		
-    } 	
-   
+		writeHeader(getCurrentSectionId());
+    }
+
 	// Insert a small comment section to identify the related G-Code in a large multi-operations file
 	var comment = "Operation " + (sectionId + 1) + " of " + nmbrOfSections;
 	if (hasParameter("operation-comment")) {
@@ -607,7 +607,7 @@ function onSection() {
 		error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
 		return;
 	}
-   
+
 	// Wait some time for spindle to speed up - only on first section, as spindle is not powered down in-between sections
 	if (isFirstSection()) {
 		onDwell(properties.spindleOnOffDelay);
@@ -740,9 +740,9 @@ function onSectionEnd() {
 		if (!isLastSection() && properties.generateMultiple && (tool.number != getNextSection().getTool().number) || (isLastSection() && !isFirstSection())) {
 			writeln("");
 			onClose();
-			closeRedirection();			
+			closeRedirection();
 		}
-	} 
+	}
 	forceAny();
 }
 
@@ -759,13 +759,13 @@ function onClose() {
 	//onDwell(properties.spindleOnOffDelay);																			// Wait for spindle to stop
     gMotionModal.reset();
 	if (properties.gotoMCSatend) {  // go to MCS home
-        writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), 
-		"X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
+        writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0),
+		"X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)),
 		"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	// Return to home position
     } else {  // go to WCS home
-        writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), 
-		"X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)), 
-		"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));	
+        writeBlock(gAbsIncModal.format(90), gMotionModal.format(0),
+		"X" + xyzFormat.format(toPreciseUnit(properties.machineHomeX,MM)),
+		"Y" + xyzFormat.format(toPreciseUnit(properties.machineHomeY,MM)));
     }
 	writeBlock(mFormat.format(30));  // Program End
 	writeln("%");							// EndOfFile marker
@@ -778,5 +778,3 @@ function onTerminate() {
 	//var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
 	//FileSystem.moveFile(getOutputPath(), FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(1) + "of" + filesToGenerate + ".nc"));
 }
-
-
