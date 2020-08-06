@@ -29,8 +29,9 @@ Changelog
 10 Jun 2020 - V1.0.16 : OpenBuilds-Fusion360-Postprocessor, Semantic Versioning, Automatically add router dial if Router type is set (OpenBuilds)
 11 Jun 2020 - V1.0.17 : Improved the header comments, code formatting, removed all tab chars, fixed multifile name extensions
 21 Jul 2020 - V1.0.18 : Combined with Laser post - will output laser file as if an extra tool.
+08 Aug 2020 - V1.0.19 : Fix for spindleondelay missing on subfiles
 */
-obversion = 'V1.0.18';
+obversion = 'V1.0.19';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -232,6 +233,7 @@ var multipleToolError = false; //used for alerting during single file generation
 var filesToGenerate = 1;       //used to figure out how many files will be generated so we can diplay in header
 var minimumFeedRate = toPreciseUnit(45,MM);
 var fileIndexFormat = createFormat({width:2, zeropad: true, decimals:0});
+var isNewfile = false;  // set true when a new file has just been started
 
 var isLaser = false;    // set true for laser/water/plasma
 var power = 0;          // the setpower value, for S word when laser cuttign
@@ -601,6 +603,7 @@ function onSection() {
       redirectToFile(path);
       forceAll();
       writeHeader(getCurrentSectionId());
+      isNewfile = true;  // trigger a spindleondelay
    }
 
    // Insert a small comment section to identify the related G-Code in a large multi-operations file
@@ -692,20 +695,22 @@ function onSection() {
          if (s && !m) // means a speed change, spindle was already on, delay half the time
             onDwell(properties.spindleOnOffDelay / 2);
       } else if (properties.spindleTwoDirections) {
-         writeBlock(sOutput.format(tool.spindleRPM), mOutput.format(4));
+         s = sOutput.format(tool.spindleRPM);
+         m = mOutput.format(4);
+         writeBlock(s, m);
       } else {
          alert("Error", "Counter-clockwise Spindle Operation found, but your spindle does not support this");
          error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
          return;
       }
+      // spindle on delay if needed
+      if (m && (isFirstSection() || isNewfile))
+         onDwell(properties.spindleOnOffDelay);
+      
    } else {
       if (properties.UseZ)
          if (isFirstSection() || (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) )
             writeBlock(gFormat.format(53), gFormat.format(0), zOutput.format(toPreciseUnit(properties.machineHomeZ, MM)));
-   }
-   // Wait some time for spindle to speed up - only on first section, as spindle is not powered down in-between sections
-   if ( isFirstSection() && !isLaser ) {
-      onDwell(properties.spindleOnOffDelay);
    }
 
    // If the machine has coolant, write M8 or M9
@@ -733,10 +738,12 @@ function onSection() {
    writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y));
    if (isLaser && properties.UseZ)
       writeBlock(gMotionModal.format(0), zOutput.format(0));
+   isNewfile = false;
 }
 
 function onDwell(seconds) {
-   writeBlock(gFormat.format(4), "P" + secFormat.format(seconds));
+   if (seconds > 0.0)
+      writeBlock(gFormat.format(4), "P" + secFormat.format(seconds));
 }
 
 function onSpindleSpeed(spindleSpeed) {
