@@ -30,8 +30,9 @@ Changelog
 11 Jun 2020 - V1.0.17 : Improved the header comments, code formatting, removed all tab chars, fixed multifile name extensions
 21 Jul 2020 - V1.0.18 : Combined with Laser post - will output laser file as if an extra tool.
 08 Aug 2020 - V1.0.19 : Fix for spindleondelay missing on subfiles
+02 Oct 2020 - V1.0.20 : Fix for long comments and new restrictions
 */
-obversion = 'V1.0.19';
+obversion = 'V1.0.20';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -240,7 +241,10 @@ var power = 0;          // the setpower value, for S word when laser cuttign
 var cutmode = 0;        // M3 or M4
 var Zmax = 0;
 var workOffset = 0;
-
+var haveRapid = false;  // assume no rapid moves
+var powerOn = false;    // is the laser power on? used for laser when haveRapid=false
+var retractHeight = 1;  // will be set by onParameter and used in onLinear to detect rapids
+var linmove = 1;        // linear move mode
 
 function toTitleCase(str) {
    // function to reformat a string to 'title case'
@@ -362,7 +366,22 @@ function writeComment(text) {
    // Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
    // In order to make it simple, I replace everything which is not A-Z, 0-9, space, : , .
    // Finally put everything between () as this is the way GRBL & UGCS expect comments
-   writeln("(" + String(text).replace( /[^a-zA-Z\d:=,.]+/g, " ") + ")");
+   // v20 - split the line so no comment is longer than 70 chars
+   if (text.length > 70) {
+      text = String(text).replace( /[^a-zA-Z\d:=,.]+/g, " "); // remove illegal chars
+      var bits = text.split(" "); // get all the words
+      var out = '';
+      for (i = 0; i < bits.length; i++) {
+         out += bits[i] + " ";
+         if (out.length > 60) {         // a logn word on the end can take us to 80 chars!
+            writeln("(" + out.trim() + ")");
+            out = "";
+         }
+      }
+      if (out.length > 0)
+         writeln("(" + out.trim() + ")");
+   } else
+      writeln("(" + String(text).replace( /[^a-zA-Z\d:=,.]+/g, " ") + ")");
 }
 
 function writeHeader(secID) {
@@ -683,6 +702,7 @@ function onSection() {
       // At end of a section, spindle is retracted to clearance height, so it is only needed on the first section
       // it is done with G53 - machine coordinates, so I put it in front of anything else
       if (isFirstSection()) {
+         zOutput.reset();
          writeBlock(gFormat.format(53), gMotionModal.format(0), zOutput.format(toPreciseUnit( properties.machineHomeZ, MM)));  // Retract spindle to Machine Z Home
          gMotionModal.reset();
       } else if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
@@ -706,7 +726,7 @@ function onSection() {
       // spindle on delay if needed
       if (m && (isFirstSection() || isNewfile))
          onDwell(properties.spindleOnOffDelay);
-      
+
    } else {
       if (properties.UseZ)
          if (isFirstSection() || (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) )
@@ -762,6 +782,7 @@ function onRadiusCompensation() {
 }
 
 function onRapid(_x, _y, _z) {
+   haveRapid = true;
    if (!isLaser) {
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
@@ -786,8 +807,10 @@ function onRapid(_x, _y, _z) {
 }
 
 function onLinear(_x, _y, _z, feed) {
-   xOutput.reset();
-   yOutput.reset(); // always output x and y else arcs go mad
+   if (powerOn || haveRapid) { // do not reset if power is off - for laser G0 moves
+      xOutput.reset();
+      yOutput.reset(); // always output x and y else arcs go mad
+   }
    var x = xOutput.format(_x);
    var y = yOutput.format(_y);
    var f = feedOutput.format(feed);
@@ -795,7 +818,12 @@ function onLinear(_x, _y, _z, feed) {
       var z = zOutput.format(_z);
 
       if (x || y || z) {
-         writeBlock(gMotionModal.format(1), x, y, z, f);
+         if (!haveRapid && z)  // if z is changing
+            if (_z < retractHeight) // compare it to retractHeight, below that is G1, >= is G0
+               linmove = 1;
+            else
+               linmove = 0;
+         writeBlock(gMotionModal.format(linmove), x, y, z, f);
       } else if (f) {
          if (getNextRecord().isMotion()) {
             feedOutput.reset(); // force feed on next line
@@ -806,9 +834,21 @@ function onLinear(_x, _y, _z, feed) {
    } else {
       // laser
       if (x || y) {
-         var z = properties.UseZ ? zOutput.format(0) : "";
-         var s = sOutput.format(power);
-         writeBlock(gMotionModal.format(1), x, y, z, f, s);
+         if (haveRapid) {
+            // this is the old process when we have rapids inserted by onRapid
+            var z = properties.UseZ ? zOutput.format(0) : "";
+            var s = sOutput.format(power);
+            writeBlock(gMotionModal.format(1), x, y, z, f, s);
+         } else {
+            // this is the new process when do dont have onRapid but GRBL requires G0 moves for noncutting laser moves
+            var z = properties.UseZ ? zOutput.format(0) : "";
+            var s = sOutput.format(power);
+            if (powerOn)
+               writeBlock(gMotionModal.format(1), x, y, z, f, s);
+            else
+               writeBlock(gMotionModal.format(0), x, y, z, f, s);
+         }
+
       }
    }
 }
@@ -924,6 +964,24 @@ function onCommand(command) {
          writeComment("Program end (M02)");
          writeBlock(mFormat.format(2));
          break;
+      case COMMAND_POWER_OFF:
+         //writeComment("power off");
+         writeln("");
+         powerOn = false;
+         break;
+      case COMMAND_POWER_ON:
+         //writeComment("power ON");
+         writeln("");
+         powerOn = true;
+         break;
    }
    // for other commands see https://cam.autodesk.com/posts/reference/classPostProcessor.html#af3a71236d7fe350fd33bdc14b0c7a4c6
+}
+
+function onParameter(name, value) {
+   //writeComment("onParameter =" + name + "= :" + value);   // (onParameter =operation:retractHeight value= :5)
+   if ( (name.indexOf("retractHeight") >= 0)  && (name.indexOf("value") >= 0 ) ) { // == "operation:retractHeight value")
+      retractHeight = value;
+      //writeComment("OPERATION " + name +":"+value);
+   }
 }
