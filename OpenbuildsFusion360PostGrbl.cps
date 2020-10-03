@@ -566,6 +566,7 @@ function onOpen() {
       zOutput.format(1);
    else
       zOutput.format(0);
+   //writeComment("onOpen end");
 }
 
 function onComment(message) {
@@ -613,7 +614,9 @@ function onSection() {
    var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
    var section = getSection(sectionId);         // what is the section-object for this operation
    var tool = section.getTool();
+   writeln("");
    //writeComment("Section : " + (sectionId + 1));
+   var maxfeedrate = section.getMaximumFeedrate();
 
    if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {
       sequenceNumber ++;
@@ -755,10 +758,15 @@ function onSection() {
 
    // Rapid move to initial position, first XY, then Z
    var initialPosition = getFramePosition(currentSection.getInitialPosition());
-   writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y));
+   if (isLaser)
+      f = feedOutput.format(maxfeedrate);
+   else
+      f = "";
+   writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y), f);
    if (isLaser && properties.UseZ)
       writeBlock(gMotionModal.format(0), zOutput.format(0));
    isNewfile = false;
+   //writeComment("onSection end");
 }
 
 function onDwell(seconds) {
@@ -840,7 +848,7 @@ function onLinear(_x, _y, _z, feed) {
             var s = sOutput.format(power);
             writeBlock(gMotionModal.format(1), x, y, z, f, s);
          } else {
-            // this is the new process when do dont have onRapid but GRBL requires G0 moves for noncutting laser moves
+            // this is the new process when we dont have onRapid but GRBL requires G0 moves for noncutting laser moves
             var z = properties.UseZ ? zOutput.format(0) : "";
             var s = sOutput.format(power);
             if (powerOn)
