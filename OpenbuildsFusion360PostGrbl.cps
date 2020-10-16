@@ -614,8 +614,6 @@ function onSection() {
    var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
    var section = getSection(sectionId);         // what is the section-object for this operation
    var tool = section.getTool();
-   writeln("");
-   //writeComment("Section : " + (sectionId + 1));
    var maxfeedrate = section.getMaximumFeedrate();
 
    if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {
@@ -627,6 +625,8 @@ function onSection() {
       writeHeader(getCurrentSectionId());
       isNewfile = true;  // trigger a spindleondelay
    }
+   writeln(""); // put these here so they go in the new file
+   //writeComment("Section : " + (sectionId + 1) + " haveRapid " + haveRapid);
 
    // Insert a small comment section to identify the related G-Code in a large multi-operations file
    var comment = "Operation " + (sectionId + 1) + " of " + nmbrOfSections;
@@ -974,12 +974,14 @@ function onCommand(command) {
          break;
       case COMMAND_POWER_OFF:
          //writeComment("power off");
-         writeln("");
+         if (!haveRapid)
+            writeln("");
          powerOn = false;
          break;
       case COMMAND_POWER_ON:
          //writeComment("power ON");
-         writeln("");
+         if (!haveRapid)         
+            writeln("");
          powerOn = true;
          break;
    }
