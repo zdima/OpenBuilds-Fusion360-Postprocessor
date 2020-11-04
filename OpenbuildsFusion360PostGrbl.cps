@@ -31,8 +31,9 @@ Changelog
 21 Jul 2020 - V1.0.18 : Combined with Laser post - will output laser file as if an extra tool.
 08 Aug 2020 - V1.0.19 : Fix for spindleondelay missing on subfiles
 02 Oct 2020 - V1.0.20 : Fix for long comments and new restrictions
+04 Nov 2020 - V1.0.21 : poweron/off for plasma, coolant can be turned on for laser/plasma too
 */
-obversion = 'V1.0.20';
+obversion = 'V1.0.21';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -236,8 +237,9 @@ var minimumFeedRate = toPreciseUnit(45,MM);
 var fileIndexFormat = createFormat({width:2, zeropad: true, decimals:0});
 var isNewfile = false;  // set true when a new file has just been started
 
-var isLaser = false;    // set true for laser/water/plasma
-var power = 0;          // the setpower value, for S word when laser cuttign
+var isLaser = false;    // set true for laser/water/
+var isPlasma = false;   // set true for plasma
+var power = 0;          // the setpower value, for S word when laser cutting
 var cutmode = 0;        // M3 or M4
 var Zmax = 0;
 var workOffset = 0;
@@ -439,15 +441,18 @@ function writeHeader(secID) {
       var section = getSection(i);
       var tool = section.getTool();
       var rpm = section.getMaximumSpindleSpeed();
-
+      isLaser = isPlasma = false;
       switch (tool.type) {
-         case TOOL_WATER_JET:
          case TOOL_LASER_CUTTER:
-         case TOOL_PLASMA_CUTTER:
             isLaser = true;
+            break;
+         case TOOL_WATER_JET:
+         case TOOL_PLASMA_CUTTER:
+            isPlasma = true;
             break;
          default:
             isLaser = false;
+            isPlasma = false;
       }
 
       if (section.hasParameter("operation-comment")) {
@@ -460,7 +465,7 @@ function writeHeader(secID) {
       if (section.workOffset > 0) {
          writeComment("  Work Coordinate System : G" + (section.workOffset + 53));
       }
-      if (isLaser)
+      if (isLaser || isPlasma)
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.jetDiameter) + unitstr);
       else {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
@@ -493,8 +498,8 @@ function writeHeader(secID) {
          }
       }
    }
-   if (isLaser) {
-      allowHelicalMoves = false; // laser not doing this
+   if (isLaser || isPlasma) {
+      allowHelicalMoves = false; // laser/plasma not doing this, ever
    }
    writeln("");
 
@@ -650,14 +655,16 @@ function onSection() {
    switch (tool.type) {
       case TOOL_WATER_JET:
          writeComment("Waterjet cutting with GRBL.");
-         power = 1000;
+         power = calcPower(100); // always 100%
          cutmode = 3;
-         isLaser = true;
-         writeBlock(mOutput.format(cutmode), sOutput.format(power));
+         isLaser = false;
+         isPlasma = true;
+         //writeBlock(mOutput.format(cutmode), sOutput.format(power));
          break;
       case TOOL_LASER_CUTTER:
          //writeComment("Laser cutting with GRBL.");
          isLaser = true;
+         isPlasma = false;
          var pwas = power;
          switch (currentSection.jetMode) {
             case JET_MODE_THROUGH:
@@ -689,18 +696,19 @@ function onSection() {
          break;
       case TOOL_PLASMA_CUTTER:
          writeComment("Plasma cutting with GRBL.");
-         power = 1000;
+         power = calcPower(100); // always 100%
          cutmode = 3;
-         isLaser = true;
-         writeBlock(mOutput.format(cutmode), sOutput.format(power));
+         isLaser = false;
+         isPlasma = true;
+         //writeBlock(mOutput.format(cutmode), sOutput.format(power));
          break;
       default:
          //writeComment("tool.type = " + tool.type); // all milling tools
-         isLaser = false;
+         isPlasma = isLaser = false;
          break;
    }
 
-   if ( !isLaser ) {
+   if ( !isLaser && !isPlasma ) {
       // To be safe (after jogging to whatever position), move the spindle up to a safe home position before going to the initial position
       // At end of a section, spindle is retracted to clearance height, so it is only needed on the first section
       // it is done with G53 - machine coordinates, so I put it in front of anything else
@@ -738,7 +746,7 @@ function onSection() {
 
    // If the machine has coolant, write M8 or M9
    if (properties.hasCoolant) {
-      if (tool.coolant) {
+      if (tool.coolant || isLaser || isPlasma) {
          writeBlock(mFormat.format(8));
       } else {
          writeBlock(mFormat.format(9));
@@ -758,7 +766,7 @@ function onSection() {
 
    // Rapid move to initial position, first XY, then Z
    var initialPosition = getFramePosition(currentSection.getInitialPosition());
-   if (isLaser)
+   if (isLaser || isPlasma)
       f = feedOutput.format(maxfeedrate);
    else
       f = "";
@@ -791,7 +799,7 @@ function onRadiusCompensation() {
 
 function onRapid(_x, _y, _z) {
    haveRapid = true;
-   if (!isLaser) {
+   if (!isLaser && !isPlasma) {
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
       var z = zOutput.format(_z);
@@ -805,12 +813,11 @@ function onRapid(_x, _y, _z) {
          Zmax = _z;
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
-      if (x || y)
-         if (properties.UseZ) {
-            var z = zOutput.format(0);
-            writeBlock(gMotionModal.format(0), x, y, z);
-         } else
-            writeBlock(gMotionModal.format(0), x, y);
+      var z = null;
+      if (properties.UseZ) 
+         z = zOutput.format(_z);
+      if (x || y || z)
+         writeBlock(gMotionModal.format(0), x, y, z);
    }
 }
 
@@ -822,7 +829,7 @@ function onLinear(_x, _y, _z, feed) {
    var x = xOutput.format(_x);
    var y = yOutput.format(_y);
    var f = feedOutput.format(feed);
-   if (!isLaser) {
+   if (!isLaser && !isPlasma) {
       var z = zOutput.format(_z);
 
       if (x || y || z) {
@@ -920,7 +927,7 @@ function onSectionEnd() {
 
 function onClose() {
    writeBlock(gAbsIncModal.format(90));   // Set to absolute coordinates for the following moves
-   if (!isLaser) {
+   if (!isLaser && !isPlasma) {
       gMotionModal.reset();  // for ease of reading the code always output the G0 words
       writeBlock(gAbsIncModal.format(90), gFormat.format(53), gMotionModal.format(0), "Z" + xyzFormat.format(toPreciseUnit(properties.machineHomeZ, MM)));  // Retract spindle to Machine Z Home
    }
@@ -977,12 +984,16 @@ function onCommand(command) {
          if (!haveRapid)
             writeln("");
          powerOn = false;
+         if (isPlasma)
+            writeBlock(mFormat.format(5));
          break;
       case COMMAND_POWER_ON:
          //writeComment("power ON");
          if (!haveRapid)         
             writeln("");
          powerOn = true;
+         if (isPlasma)
+            writeBlock(mFormat.format(3), sOutput.format(power)); 
          break;
    }
    // for other commands see https://cam.autodesk.com/posts/reference/classPostProcessor.html#af3a71236d7fe350fd33bdc14b0c7a4c6
