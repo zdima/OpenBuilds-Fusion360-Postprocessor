@@ -3,6 +3,10 @@
 Creates .nc files optimized for GRBL based Openbuilds-style machines.
 Supports router and laser operations.
 
+V1.0.21 now supports plasma cutting
+
+V1.0.20 supports the Personal license restrictions and ultra long comments
+
 V1.0.18 now includes laser operations. 
 1. Laser mode supports lasers with and without Z motions.
 1. It is left to the operator to correctly set GRBL parameter $32 as needed on a machine that combines a router and laser head.
@@ -14,6 +18,6 @@ V1.0.18 now includes laser operations.
 
 ### Credits ###
 
-@swarfer David the Swarfer (lead maintainer)
-@sharmstr - multifile output
-@Strooom - Initial work
+1. @swarfer David the Swarfer (lead maintainer)
+1. @sharmstr - multifile output
+1. @Strooom - Initial work

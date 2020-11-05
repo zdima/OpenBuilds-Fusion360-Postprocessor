@@ -1,4 +1,5 @@
 /*
+/*
 Custom Post-Processor for GRBL based Openbuilds-style CNC machines, router and laser-cutting
 Made possible by
 Swarfer  https://github.com/swarfer/GRBL-Post-Processor
@@ -31,7 +32,7 @@ Changelog
 21 Jul 2020 - V1.0.18 : Combined with Laser post - will output laser file as if an extra tool.
 08 Aug 2020 - V1.0.19 : Fix for spindleondelay missing on subfiles
 02 Oct 2020 - V1.0.20 : Fix for long comments and new restrictions
-04 Nov 2020 - V1.0.21 : poweron/off for plasma, coolant can be turned on for laser/plasma too
+05 Nov 2020 - V1.0.21 : poweron/off for plasma, coolant can be turned on for laser/plasma too
 */
 obversion = 'V1.0.21';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
@@ -110,7 +111,7 @@ propertyDefinitions = {
     },
     spindleOnOffDelay:  {
       title: "Spindle on/off delay",
-      description: "Time (in seconds) the spindle needs to get up to speed or stop",
+      description: "Time (in seconds) the spindle needs to get up to speed or stop, also used for plasma pierce delay",
       type: "number",
       group: 2
     },
@@ -163,11 +164,11 @@ propertyDefinitions = {
       group: 6
    },
    
-   _Section5:     {title:"--- LASER CUTTING OPTIONS ---", description:"Informational only. Not used for any computation.", type:"string", group: 7},
+   _Section5:     {title:"--- LASER/PLASMA CUTTING OPTIONS ---", description:"Informational only. Not used for any computation.", type:"string", group: 7},
    PowerVaporise: {title:"Power for Vaporizing", description:"Scary power VAPORIZE power setting, in percent.", group:8, type:"integer"},
    PowerThrough:  {title:"Power for Through Cutting", description:"Normal Through cutting power, in percent.", group:8, type:"integer"},
    PowerEtch:     {title:"Power for Etching", description:"Just enoguh power to Etch the surface, in percent.", group:8, type:"integer"},
-   UseZ:          {title:"Use Z motions at start and end.", description:"Use True if you have a laser on a router with Z motion.", group:8, type:"boolean"}, 
+   UseZ:          {title:"Use Z motions at start and end.", description:"Use True if you have a laser on a router with Z motion, or a PLASMA cutter.", group:8, type:"boolean"}, 
 
    _Section6: {
       title:"--- MACHINE INFO ---",
@@ -813,8 +814,8 @@ function onRapid(_x, _y, _z) {
          Zmax = _z;
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
-      var z = null;
-      if (properties.UseZ) 
+      var z = "";
+      if (properties.UseZ)
          z = zOutput.format(_z);
       if (x || y || z)
          writeBlock(gMotionModal.format(0), x, y, z);
@@ -847,13 +848,16 @@ function onLinear(_x, _y, _z, feed) {
          }
       }
    } else {
-      // laser
+      // laser, plasma
       if (x || y) {
          if (haveRapid) {
             // this is the old process when we have rapids inserted by onRapid
             var z = properties.UseZ ? zOutput.format(0) : "";
             var s = sOutput.format(power);
-            writeBlock(gMotionModal.format(1), x, y, z, f, s);
+            if (isPlasma && !powerOn) // plasma does some odd routing that should be rapid
+               writeBlock(gMotionModal.format(0), x, y, z, f, s);
+            else
+               writeBlock(gMotionModal.format(1), x, y, z, f, s);
          } else {
             // this is the new process when we dont have onRapid but GRBL requires G0 moves for noncutting laser moves
             var z = properties.UseZ ? zOutput.format(0) : "";
@@ -887,28 +891,31 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
       linearize(tolerance);
       return;
    } else {
-      switch (getCircularPlane()) {
-         case PLANE_XY:
-            if (!isLaser)
-               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
-            else
-               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
-            break;
-         case PLANE_ZX:
-            if (!isLaser)
-               writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-            else
+      if (isPlasma && !powerOn)
+         linearize(tolerance * 4);
+      else
+         switch (getCircularPlane()) {
+            case PLANE_XY:
+               if (!isLaser)
+                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+               else
+                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+               break;
+            case PLANE_ZX:
+               if (!isLaser)
+                  writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+               else
+                  linearize(tolerance);
+               break;
+            case PLANE_YZ:
+               if (!isLaser)
+                  writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+               else
+                  linearize(tolerance);
+               break;
+            default:
                linearize(tolerance);
-            break;
-         case PLANE_YZ:
-            if (!isLaser)
-               writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-            else
-               linearize(tolerance);
-            break;
-         default:
-            linearize(tolerance);
-      }
+         }
    }
 }
 
@@ -989,11 +996,11 @@ function onCommand(command) {
          break;
       case COMMAND_POWER_ON:
          //writeComment("power ON");
-         if (!haveRapid)         
+         if (!haveRapid)
             writeln("");
          powerOn = true;
          if (isPlasma)
-            writeBlock(mFormat.format(3), sOutput.format(power)); 
+            writeBlock(mFormat.format(3), sOutput.format(power));
          break;
    }
    // for other commands see https://cam.autodesk.com/posts/reference/classPostProcessor.html#af3a71236d7fe350fd33bdc14b0c7a4c6
@@ -1004,5 +1011,9 @@ function onParameter(name, value) {
    if ( (name.indexOf("retractHeight") >= 0)  && (name.indexOf("value") >= 0 ) ) { // == "operation:retractHeight value")
       retractHeight = value;
       //writeComment("OPERATION " + name +":"+value);
+   }
+   if ((name == 'action') && (value == 'pierce')) {
+      //writeComment('action pierce');
+      onDwell(properties.spindleOnOffDelay);
    }
 }
