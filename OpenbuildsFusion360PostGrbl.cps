@@ -474,7 +474,7 @@ function writeHeader(secID) {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.jetDiameter) + unitstr);
       else {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
-         if (properties.routerType == "Dewalt" || properties.routerType == "Makita") {
+         if (properties.routerType != "Other") {
             writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm, op));
          } else {
             writeComment("  Spindle : RPM = " + rpm);
