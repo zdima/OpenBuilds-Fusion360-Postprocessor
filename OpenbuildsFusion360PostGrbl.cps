@@ -268,7 +268,7 @@ function rpm2dial(rpm, op) {
    if (properties.routerType == "Dewalt") {
       var speeds = [0, 16000, 18200, 20400, 22600, 24800, 27000];
    } else if (properties.routerType == "Router11") {
-      var speeds = [0, 10000, 14000, 20400, 18000, 23000, 27000, 32000];
+      var speeds = [0, 10000, 14000, 18000, 23000, 27000, 32000];
    } else {
       var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
    }
@@ -474,7 +474,7 @@ function writeHeader(secID) {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.jetDiameter) + unitstr);
       else {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
-         if (properties.routerType != "Other") {
+         if (properties.routerType != "other") {
             writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm, op));
          } else {
             writeComment("  Spindle : RPM = " + rpm);
