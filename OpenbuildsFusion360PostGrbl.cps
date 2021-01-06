@@ -33,8 +33,9 @@ Changelog
 08 Aug 2020 - V1.0.19 : Fix for spindleondelay missing on subfiles
 02 Oct 2020 - V1.0.20 : Fix for long comments and new restrictions
 05 Nov 2020 - V1.0.21 : poweron/off for plasma, coolant can be turned on for laser/plasma too
+04 Dec 2020 - V1.0.22 : Add Router11 and dial settings
 */
-obversion = 'V1.0.21';
+obversion = 'V1.0.22';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -99,6 +100,7 @@ propertyDefinitions = {
       group: 2,
       values:[
         {title:"Other", id:"other"},
+        {title:"Router11", id:"Router11"},
         {title:"Makita RT0701", id:"Makita"},
         {title:"Dewalt 611", id:"Dewalt"}
       ]
@@ -265,6 +267,8 @@ function rpm2dial(rpm, op) {
 
    if (properties.routerType == "Dewalt") {
       var speeds = [0, 16000, 18200, 20400, 22600, 24800, 27000];
+   } else if (properties.routerType == "Router11") {
+      var speeds = [0, 10000, 14000, 18000, 23000, 27000, 32000];
    } else {
       var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
    }
@@ -470,7 +474,7 @@ function writeHeader(secID) {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.jetDiameter) + unitstr);
       else {
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
-         if (properties.routerType == "Dewalt" || properties.routerType == "Makita") {
+         if (properties.routerType != "other") {
             writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm, op));
          } else {
             writeComment("  Spindle : RPM = " + rpm);
