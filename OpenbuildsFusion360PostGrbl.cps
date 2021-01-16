@@ -34,8 +34,9 @@ Changelog
 02 Oct 2020 - V1.0.20 : Fix for long comments and new restrictions
 05 Nov 2020 - V1.0.21 : poweron/off for plasma, coolant can be turned on for laser/plasma too
 04 Dec 2020 - V1.0.22 : Add Router11 and dial settings
+16 Jan 2021 - V1.0.23 : Remove end of file marker '%' from end of output, arcs smaller than toolRadius will be linearized
 */
-obversion = 'V1.0.22';
+obversion = 'V1.0.23';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -80,6 +81,7 @@ properties =
    PowerThrough  : 50,
    PowerEtch     : 2,  
    UseZ : false,           // if true then Z will be moved to 0 at beginning and back to 'retract height' at end
+   linearizeSmallArcs: false,     // arcs with radius < toolRadius have radius errors, linearize instead?
    machineVendor : "OpenBuilds",
    machineModel : "Generic",
    machineControl : "Grbl 1.1 / BlackBox",
@@ -165,11 +167,17 @@ propertyDefinitions = {
       type:"spatial",
       group: 6
    },
+   linearizeSmallArcs: {
+      title:"Linearize Small Arcs",
+      description: "Arcs with radius < toolRadius can have mismatched radii, set this to Yes to linearize them.",
+      type:"boolean",
+      group: 6
+   },
    
    _Section5:     {title:"--- LASER/PLASMA CUTTING OPTIONS ---", description:"Informational only. Not used for any computation.", type:"string", group: 7},
    PowerVaporise: {title:"Power for Vaporizing", description:"Scary power VAPORIZE power setting, in percent.", group:8, type:"integer"},
    PowerThrough:  {title:"Power for Through Cutting", description:"Normal Through cutting power, in percent.", group:8, type:"integer"},
-   PowerEtch:     {title:"Power for Etching", description:"Just enoguh power to Etch the surface, in percent.", group:8, type:"integer"},
+   PowerEtch:     {title:"Power for Etching", description:"Just enough power to Etch the surface, in percent.", group:8, type:"integer"},
    UseZ:          {title:"Use Z motions at start and end.", description:"Use True if you have a laser on a router with Z motion, or a PLASMA cutter.", group:8, type:"boolean"}, 
 
    _Section6: {
@@ -217,7 +225,7 @@ var feedOutput = createVariable({prefix:"F"}, feedFormat);
 var sOutput = createVariable({prefix:"S", force:false}, rpmFormat);
 var mOutput = createVariable({force:false}, mFormat); // only use for M3/4/5
 
-// for arcs, use extra digit (not used anymore from jan 2018)
+// for arcs
 var xaOutput = createVariable({prefix:"X", force:true}, arcFormat);
 var yaOutput = createVariable({prefix:"Y", force:true}, arcFormat);
 var zaOutput = createVariable({prefix:"Z", force:false}, arcFormat);
@@ -250,6 +258,7 @@ var haveRapid = false;  // assume no rapid moves
 var powerOn = false;    // is the laser power on? used for laser when haveRapid=false
 var retractHeight = 1;  // will be set by onParameter and used in onLinear to detect rapids
 var linmove = 1;        // linear move mode
+var toolRadius;         // for arc linearization
 
 function toTitleCase(str) {
    // function to reformat a string to 'title case'
@@ -626,6 +635,8 @@ function onSection() {
    var tool = section.getTool();
    var maxfeedrate = section.getMaximumFeedrate();
 
+   toolRadius = tool.diameter / 2.0;
+
    if (!isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) {
       sequenceNumber ++;
       //var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
@@ -723,6 +734,7 @@ function onSection() {
          gMotionModal.reset();
       } else if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
          writeBlock(gFormat.format(53), gFormat.format(0), zOutput.format(toPreciseUnit(properties.machineHomeZ, MM)));  // Retract spindle to Machine Z Home
+
       // Insert the Spindle start command
       if (tool.clockwise) {
          s = sOutput.format(tool.spindleRPM);
@@ -890,13 +902,22 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
    var start = getCurrentPosition();
    xOutput.reset();
    yOutput.reset();
+
+   // arcs smaller than bitradius always have significant radius errors, so get radius and linearize them (because we cannot change minimumCircularRadius here)
+   // note that larger arcs still have radius errors, but they are a much smaller percentage of the radius
+   var rad = Math.sqrt(Math.pow(start.x - cx,2) + Math.pow(start.y - cy, 2));
+   if (properties.linearizeSmallArcs &&  (rad < toolRadius)) {
+      //writeComment("linearizing arc radius " + round(rad,4) + " toolRadius " + round(toolRadius,3));
+      linearize(tolerance);
+      return;
+   }
    if (isFullCircle()) {
       writeComment("full circle");
       linearize(tolerance);
       return;
    } else {
       if (isPlasma && !powerOn)
-         linearize(tolerance * 4);
+         linearize(tolerance * 4); // this is a rapid move so tolerance can be increased for faster motion and fewer lines of code
       else
          switch (getCircularPlane()) {
             case PLANE_XY:
@@ -964,7 +985,7 @@ function onClose() {
       writeBlock(gMotionModal.format(0), xOutput.format(0), yOutput.format(0));
    }
    writeBlock(mFormat.format(30));  // Program End
-   writeln("%");                    // EndOfFile marker
+   //writeln("%");                    // EndOfFile marker
 }
 
 function onTerminate() {
@@ -1020,4 +1041,13 @@ function onParameter(name, value) {
       //writeComment('action pierce');
       onDwell(properties.spindleOnOffDelay);
    }
+}
+
+function round(num,digits) {
+   return toFixedNumber(num,digits,10)
+}
+
+function toFixedNumber(num, digits, base) {
+   var pow = Math.pow(base||10, digits);  // cleverness found on web
+   return Math.round(num*pow) / pow;
 }
