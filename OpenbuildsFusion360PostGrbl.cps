@@ -35,8 +35,9 @@ Changelog
 05 Nov 2020 - V1.0.21 : poweron/off for plasma, coolant can be turned on for laser/plasma too
 04 Dec 2020 - V1.0.22 : Add Router11 and dial settings
 16 Jan 2021 - V1.0.23 : Remove end of file marker '%' from end of output, arcs smaller than toolRadius will be linearized
+25 Jan 2021 - V1.0.24 : Improve coolant codes
 */
-obversion = 'V1.0.23';
+obversion = 'V1.0.24';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -761,14 +762,6 @@ function onSection() {
             writeBlock(gFormat.format(53), gFormat.format(0), zOutput.format(toPreciseUnit(properties.machineHomeZ, MM)));
    }
 
-   // If the machine has coolant, write M8 or M9
-   if (properties.hasCoolant) {
-      if (tool.coolant || isLaser || isPlasma) {
-         writeBlock(mFormat.format(8));
-      } else {
-         writeBlock(mFormat.format(9));
-      }
-   }
 
    forceXYZ();
 
@@ -788,6 +781,15 @@ function onSection() {
    else
       f = "";
    writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y), f);
+
+   // If the machine has coolant, write M8/M7 or M9
+   if (properties.hasCoolant) {
+      if (isLaser || isPlasma)
+         setCoolant(1) // always turn it on since plasma tool has no coolant option in fusion
+      else
+         setCoolant(tool.coolant); // use tool setting
+   }
+   
    if (isLaser && properties.UseZ)
       writeBlock(gMotionModal.format(0), zOutput.format(0));
    isNewfile = false;
@@ -965,7 +967,7 @@ function onClose() {
    }
    writeBlock(mFormat.format(5));                              // Stop Spindle
    if (properties.hasCoolant) {
-      writeBlock(mFormat.format(9));                           // Stop Coolant
+      setCoolant(0);                           // Stop Coolant
    }
    //onDwell(properties.spindleOnOffDelay);                    // Wait for spindle to stop
    gMotionModal.reset();
@@ -1051,3 +1053,30 @@ function toFixedNumber(num, digits, base) {
    var pow = Math.pow(base||10, digits);  // cleverness found on web
    return Math.round(num*pow) / pow;
 }
+
+// set the coolant mode from the tool value
+function setCoolant(coolval)
+   {
+   //writeComment("setCoolant " + coolval);
+   // 0 if off, 1 is flood, 2 is mist
+   switch(coolval) {
+      case 0: 
+         writeBlock(mFormat.format(9)); // off
+         break;
+      case 1:
+         writeBlock(mFormat.format(8)); // flood
+         break;
+      case 2:
+         writeComment("Mist coolant on pin A3. special GRBL compile for this.");
+         writeBlock(mFormat.format(7)); // mist
+         break;
+      case 7:  // flood and mist   
+         writeBlock(mFormat.format(8)); // flood
+         writeBlock(mFormat.format(7)); // mist
+         break;
+      default:
+         writeComment("Coolant option not understood: " + coolval);      
+         alert("Warning", "Coolant option not understood: " + coolval);
+      }
+   }
+   
