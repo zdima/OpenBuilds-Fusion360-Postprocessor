@@ -4,7 +4,7 @@ Creates .nc files optimized for GRBL based Openbuilds-style machines.
 Supports router and laser operations.
 
 V1.0.25 supports plasma torch touchoff probing.
-* Read the (instructions)[https://github.com/OpenBuilds/OpenBuilds-Fusion360-Postprocessor/blob/master/README-plasma.md]
+* Read the [instructions](https://github.com/OpenBuilds/OpenBuilds-Fusion360-Postprocessor/blob/master/README-plasma.md)
 
 V1.0.21 now supports plasma cutting
 
