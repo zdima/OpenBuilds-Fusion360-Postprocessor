@@ -37,8 +37,9 @@ Changelog
 16 Jan 2021 - V1.0.23 : Remove end of file marker '%' from end of output, arcs smaller than toolRadius will be linearized
 25 Jan 2021 - V1.0.24 : Improve coolant codes
 26 Jan 2021 - V1.0.25 : Plasma pierce height, and probe
+29 Aug 2021 - V1.0.26 : Regroup properties for display, Z height check options
 */
-obversion = 'V1.0.25';
+obversion = 'V1.0.26';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -74,11 +75,6 @@ properties =
    machineHomeX : -10,            // always in millimeters
    machineHomeY : -10,
    gotoMCSatend : false,          // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
-   _Section2: "******",                // used to break up properties into sections for clarity
-   _Section3: "******",                // used to break up properties into sections for clarity
-   _Section4: "******",                // used to break up properties into sections for clarity
-   _Section5: "******",                // used to break up properties into sections for clarity - laser options
-   _Section6: "******",                // used to break up properties into sections for clarity
    PowerVaporise : 100,    // cutting power in percent
    PowerThrough  : 50,
    PowerEtch     : 2,  
@@ -91,21 +87,18 @@ properties =
    machineVendor : "OpenBuilds",
    machineModel : "Generic",
    machineControl : "Grbl 1.1 / BlackBox",
+   
+   checkZ : false,    // true for a PS tool height checkmove at start of every file
+   checkFeed : 200    // always MM/min
 };
 
 // user-defined property definitions - note, do not skip any group numbers
 propertyDefinitions = {
-    _Section2: {
-      title:"--- SPINDLE INFO ---",
-      description:"Informational only. Not used for any computation.",
-      type:"string",
-      group: 2
-   },
    routerType:  {
-      title: "Spindle/Router type",
+      group: 1,
+      title: "SPINDLE: Spindle/Router type",
       description: "Select the type of spindle you have.",
       type: "enum",
-      group: 2,
       values:[
         {title:"Other", id:"other"},
         {title:"Router11", id:"Router11"},
@@ -114,103 +107,98 @@ propertyDefinitions = {
       ]
    },
    spindleTwoDirections:  {
-      title: "Spindle can rotate clockwise and counterclockwise?",
+      group: 1,
+      title: "SPINDLE: Spindle can rotate clockwise and counterclockwise?",
       description:  "Yes : spindle can rotate clockwise and counterclockwise, will send M3 and M4. No : spindle can only go clockwise, will only send M3",
       type: "boolean",
-      group: 2
     },
     spindleOnOffDelay:  {
-      title: "Spindle on/off delay",
+      group: 1,
+      title: "SPINDLE: Spindle on/off delay",
       description: "Time (in seconds) the spindle needs to get up to speed or stop, also used for plasma pierce delay",
       type: "number",
-      group: 2
     },
     hasCoolant:  {
-      title: "Has coolant?",
+      group: 1,
+      title: "SPINDLE: Has coolant?",
       description: "Yes: machine uses the coolant output, M8 M9 will be sent. No : coolant output not connected, so no M8 M9 will be sent",
       type: "boolean",
-      group: 3
     },
-    _Section3: {
-      title:"--- TOOL CHANGE HANDLING ---",
-      description:"Informational only. Not used for any computation.",
-      type:"string",
-      group: 4
-   },
+    checkFeed:  {
+      group: 2,
+      title: "SAFETY: Check tool feedrate",
+      description: "Feedrate to be used for the tool length check, always millimeters.",
+      type: "spatial",
+    },
+    checkZ:  {
+      group: 2,
+      title: "SAFETY: Check tool Z length?",
+      description: "Insert a safe move and program pause M0 to check for tool length, tool will lower to clearanceHeight set in the Heights tab.",
+      type: "boolean",
+    },
+
    generateMultiple: {
-      title:"Generate muliple files for tool changes?",
+      group: 3,
+      title:"TOOLCHANGE: Generate muliple files for tool changes?",
       description: "Generate multiple files. One for each tool change.",
       type:"boolean",
-      group: 4
     },
-    _Section4: {
-      title:"--- END OF JOB COORDINATES ---",
-      description:"Informational only. Not used for any computation.",
-      type:"string",
-      group: 5
-   },
+
+
    gotoMCSatend: {
-      title:"Use Machine Coordinates (G53) at end of job?",
+      group: 4,
+      title:"JOBEND: Use Machine Coordinates (G53) at end of job?",
       description: "Yes will do G53 G0 x{machinehomeX} y(machinehomeY) (Machine Coordinates), No will do G0 x(machinehomeX) y(machinehomeY) (Work Coordinates) at end of program",
       type:"boolean",
-      group: 5
    },
    machineHomeX: {
-      title:"End of job X position (MM).",
+      group: 4,
+      title:"JOBEND: End of job X position (MM).",
       description: "(G53 or G54) X position to move to in Millimeters",
       type:"spatial",
-      group: 6
    },
    machineHomeY: {
-      title:"End of job Y position (MM).",
+      group: 4,
+      title:"JOBEND: End of job Y position (MM).",
       description: "(G53 or G54) Y position to move to in Millimeters.",
       type:"spatial",
-      group: 6
    },
    machineHomeZ: {
-      title:"End of job Z position (MCS Only) (MM)",
-      description: "G53 Z position to move to in Millimeters, normally negative.",
+      group: 4,
+      title:"JOBEND: START and End of job Z position (MCS Only) (MM)",
+      description: "G53 Z position to move to in Millimeters, normally negative.  Moves to this distance below Z home.",
       type:"spatial",
-      group: 6
    },
+
+
    linearizeSmallArcs: {
-      title:"Linearize Small Arcs",
-      description: "Arcs with radius < toolRadius can have mismatched radii, set this to Yes to linearize them.",
+      group: 5,
+      title:"ARCS: Linearize Small Arcs",
+      description: "Arcs with radius < toolRadius can have mismatched radii, set this to Yes to linearize them. This solves G2/G3 radius mismatch errors.",
       type:"boolean",
-      group: 6
    },
    
-   _Section5:     {title:"--- LASER/PLASMA CUTTING OPTIONS ---", description:"Informational only. Not used for any computation.", type:"string", group: 7},
-   PowerVaporise: {title:"Power for Vaporizing", description:"Scary power VAPORIZE power setting, in percent.", group:8, type:"integer"},
-   PowerThrough:  {title:"Power for Through Cutting", description:"Normal Through cutting power, in percent.", group:8, type:"integer"},
-   PowerEtch:     {title:"Power for Etching", description:"Just enough power to Etch the surface, in percent.", group:8, type:"integer"},
-   UseZ:          {title:"Use Z motions at start and end.", description:"Use True if you have a laser on a router with Z motion, or a PLASMA cutter.", group:8, type:"boolean"}, 
-   plasma_usetouchoff:  {title:"Use Z touchoff probe routine", description:"Set to true if have a touchoff probe for Plasma.", group:8, type:"boolean"}, 
-   plasma_touchoffOffset:{title:"Plasma touch probe offset", description:"Offset in Z at which the probe triggers, always Millimeters, always positive.", group:8, type:"spatial"},
+   PowerVaporise: {title:"LASER: Power for Vaporizing", description:"Scary power VAPORIZE power setting, in percent.", group:6, type:"integer"},
+   PowerThrough:  {title:"LASER: Power for Through Cutting", description:"Normal Through cutting power, in percent.", group:6, type:"integer"},
+   PowerEtch:     {title:"LASER: Power for Etching", description:"Just enough power to Etch the surface, in percent.", group:6, type:"integer"},
+   UseZ:          {title:"LASER: Use Z motions at start and end.", description:"Use True if you have a laser on a router with Z motion, or a PLASMA cutter.", group:6, type:"boolean"}, 
+   plasma_usetouchoff:  {title:"PLASMA: Use Z touchoff probe routine", description:"Set to true if have a touchoff probe for Plasma.", group:6, type:"boolean"}, 
+   plasma_touchoffOffset:{title:"PLASMA: Plasma touch probe offset", description:"Offset in Z at which the probe triggers, always Millimeters, always positive.", group:6, type:"spatial"},
 
-   _Section6: {
-      title:"--- MACHINE INFO ---",
-      description:"Informational only. Not used for any computation.",
-      type:"string",
-      group: 9
-   },
    machineVendor: {
       title:"Machine Vendor",
       description: "Machine vendor defined here will be displayed in header if machine config not set.",
       type:"string",
-      group: 9
    },
    machineModel: {
       title:"Machine Model",
       description: "Machine model defined here will be displayed in header if machine config not set.",
       type:"string",
-      group: 9
    },
    machineControl: {
       title:"Machine Control",
       description: "Machine control defined here will be displayed in header if machine config not set.",
       type:"string",
-      group: 9
     }
 };
 
@@ -219,7 +207,7 @@ plasma_probedistance = 30;   // distance to probe down in Z, always in millimete
 plasma_proberate = 100;      // feedrate for probing, in mm/minute
 // END OF USER ADJUSTMENTS
 
-var debug = true;
+var debug = false;
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
 var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
@@ -271,6 +259,7 @@ var workOffset = 0;
 var haveRapid = false;  // assume no rapid moves
 var powerOn = false;    // is the laser power on? used for laser when haveRapid=false
 var retractHeight = 1;  // will be set by onParameter and used in onLinear to detect rapids
+var clearanceHeight = 10;  // will be set by onParameter 
 var topHeight = 1;      // set by onParameter
 var leadinRate = 314;   // set by onParameter: the lead-in feedrate,plasma
 var linmove = 1;        // linear move mode
@@ -913,6 +902,16 @@ function onSection()
       f = "";
    writeBlock(gAbsIncModal.format(90), gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y), f);
 
+   if ( (isNewfile || isFirstSection()) && properties.checkZ && (properties.checkFeed > 0) )
+      {
+      // do a Peter Stanton style Z seek and stop for a height check   
+      z = zOutput.format(clearanceHeight);
+      f = feedOutput.format(toPreciseUnit(properties.checkFeed,MM));
+      writeComment("Tool height check");
+      writeBlock(gMotionModal.format(1), z, f );
+      writeBlock(mOutput.format(0));
+      }
+
    // If the machine has coolant, write M8/M7 or M9
    if (properties.hasCoolant)
       {
@@ -1270,26 +1269,29 @@ function onCommand(command)
 function onParameter(name, value)
    {
    // writeComment("onParameter =" + name + "= " + value);   // (onParameter =operation:retractHeight value= :5)
-   if ( (name.indexOf("retractHeight") >= 0)  && (name.indexOf("value") >= 0 ) )   // == "operation:retractHeight value")
+   name = name.replace(" ","_");  // dratted indexOF cannot have spaces in it!    
+   if ( (name.indexOf("retractHeight_value") >= 0 ) )   // == "operation:retractHeight value")
       {
       retractHeight = value;
-      //writeComment("OPERATION " + name +":"+value);
+      if (debug) writeComment("retractHeight = "+retractHeight);
       }
-   if (name.indexOf("movement") !== -1)
+   if (name.indexOf("operation:clearanceHeight_value") >= 0)
       {
-      name = name.replace(" ","_");  // dratted indexOF cannot have spaces in it!
-      if (name.indexOf("lead_in") !== -1)
-         {
-         leadinRate = value;
-         if (debug && isPlasma) writeComment("leadinRate set " + leadinRate);
-         }      
+      clearanceHeight = value;
+      if (debug) writeComment("clearanceHeight = "+clearanceHeight);
       }
-   if (name.indexOf("topHeight") > 0)
-      if (name.indexOf("value") > 0)
-         {
-         topHeight = value;
-         if (debug && isPlasma) writeComment("topHeight set " + topHeight);
-         }
+
+   if (name.indexOf("movement:lead_in") !== -1)
+      {
+      leadinRate = value;
+      if (debug && isPlasma) writeComment("leadinRate set " + leadinRate);
+      }      
+
+   if (name.indexOf("operation:topHeight_value") >= 0)
+      {
+      topHeight = value;
+      if (debug && isPlasma) writeComment("topHeight set " + topHeight);
+      }
    // (onParameter =operation:pierceClearance= 1.5)    for plasma
    if (name == 'operation:pierceClearance')
       plasma_pierceHeight = value;
