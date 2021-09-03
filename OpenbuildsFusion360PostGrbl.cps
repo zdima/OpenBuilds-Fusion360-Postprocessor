@@ -38,8 +38,9 @@ Changelog
 25 Jan 2021 - V1.0.24 : Improve coolant codes
 26 Jan 2021 - V1.0.25 : Plasma pierce height, and probe
 29 Aug 2021 - V1.0.26 : Regroup properties for display, Z height check options
+03 Sep 2021 - V1.0.27 : Fix arc ramps not changing Z when they should have
 */
-obversion = 'V1.0.26';
+obversion = 'V1.0.27';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
@@ -228,10 +229,6 @@ var sOutput = createVariable({prefix:"S", force:false}, rpmFormat);
 var mOutput = createVariable({force:false}, mFormat); // only use for M3/4/5
 
 // for arcs
-var xaOutput = createVariable({prefix:"X", force:true}, arcFormat);
-var yaOutput = createVariable({prefix:"Y", force:true}, arcFormat);
-var zaOutput = createVariable({prefix:"Z", force:false}, arcFormat);
-
 var iOutput = createReferenceVariable({prefix:"I", force:true}, arcFormat);
 var jOutput = createReferenceVariable({prefix:"J", force:true}, arcFormat);
 var kOutput = createReferenceVariable({prefix:"K", force:true}, arcFormat);
@@ -676,9 +673,6 @@ function forceXYZ()
    xOutput.reset();
    yOutput.reset();
    zOutput.reset();
-   xaOutput.reset();
-   yaOutput.reset();
-   zaOutput.reset();
    }
 
 function forceAny()
@@ -1074,7 +1068,7 @@ function onLinear5D(_x, _y, _z, _a, _b, _c, feed)
 function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
    {
    var start = getCurrentPosition();
-   xOutput.reset();
+   xOutput.reset(); // always have X and Y, Z will output of it changed
    yOutput.reset();
 
    // arcs smaller than bitradius always have significant radius errors, so get radius and linearize them (because we cannot change minimumCircularRadius here)
@@ -1101,22 +1095,22 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
             {
             case PLANE_XY:
                if (!isLaser && !isPlasma)
-                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
                else
                   {
                   zo = properties.UseZ ? zOutput.format(z) : "";   
-                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zo, iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zo, iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
                   }
                break;
             case PLANE_ZX:
                if (!isLaser)
-                  writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+                  writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
                else
                   linearize(tolerance);
                break;
             case PLANE_YZ:
                if (!isLaser)
-                  writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xaOutput.format(x), yaOutput.format(y), zaOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+                  writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
                else
                   linearize(tolerance);
                break;
