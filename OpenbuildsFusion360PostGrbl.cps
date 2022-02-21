@@ -40,8 +40,9 @@ Changelog
 03 Sep 2021 - V1.0.27 : Fix arc ramps not changing Z when they should have
 12 Nov 2021 - V1.0.28 : Added property group names, fixed default router selection, now uses permittedCommentChars  (sharmstr)
 24 Nov 2021 - V1.0.28 : Improved coolant selection, tweaked property groups, tweaked G53 generation, links for help in comments.
+21 Feb 2022 - V1.0.29 : Fix sideeffects of drill operation having rapids even when in noRapid mode by always resetting haveRapid in onSection
 */
-obversion = 'V1.0.28';
+obversion = 'V1.0.29';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library diaglog box
 vendor = "OpenBuilds";
@@ -73,7 +74,7 @@ properties =
    spindleOnOffDelay: 1.8,        // time (in seconds) the spindle needs to get up to speed or stop, or laser/plasma pierce delay
    spindleTwoDirections : false,  // true : spindle can rotate clockwise and counterclockwise, will send M3 and M4. false : spindle can only go clockwise, will only send M3
    hasCoolant : false,            // true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
-   routerType : "Other",
+   routerType : "other",
    generateMultiple: true,        // specifies if a file should be generated for each tool change
    machineHomeZ : -10,            // absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
    machineHomeX : -10,            // always in millimeters
@@ -569,11 +570,11 @@ function writeHeader(secID)
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
          if (properties.routerType != "other")
             {
-            writeComment("  Spindle : RPM = " + rpm + ", set router dial to " + rpm2dial(rpm, op));
+            writeComment("  Spindle : RPM = " + round(rpm,0) + ", set router dial to " + rpm2dial(rpm, op));
             }
          else
             {
-            writeComment("  Spindle : RPM = " + rpm);
+            writeComment("  Spindle : RPM = " + round(rpm,0));
             }
          }
       checkMinFeedrate(section, op);
@@ -788,7 +789,8 @@ function onSection()
    var tool = section.getTool();
    var maxfeedrate = section.getMaximumFeedrate();
    if (debug) writeComment("onSection " + sectionId);
-
+   haveRapid = false; // drilling sections will have rapids even when other ops do not
+   
    onRadiusCompensation(); // must check every section
 
    if (isPlasma)
@@ -827,7 +829,8 @@ function onSection()
       comment = comment + " : " + getParameter("operation-comment");
       }
    writeComment(comment);
-
+   if (debug)
+      writeComment("retractHeight = " + retractHeight);
    // Write the WCS, ie. G54 or higher.. default to WCS1 / G54 if no or invalid WCS
    if (!isFirstSection() && (currentworkOffset !=  (53 + section.workOffset)) )
       {
@@ -1055,6 +1058,7 @@ function onRapid(_x, _y, _z)
 
 function onLinear(_x, _y, _z, feed)
    {
+   //if (debug) writeComment("onLinear " + haveRapid);   
    if (powerOn || haveRapid)   // do not reset if power is off - for laser G0 moves
       {
       xOutput.reset();
@@ -1069,6 +1073,7 @@ function onLinear(_x, _y, _z, feed)
 
       if (x || y || z)
          {
+         linmove = 1;          // have to have a default!
          if (!haveRapid && z)  // if z is changing
             {
             if (_z < retractHeight) // compare it to retractHeight, below that is G1, >= is G0
@@ -1334,7 +1339,7 @@ function onCommand(command)
 
 function onParameter(name, value)
    {
-   // writeComment("onParameter =" + name + "= " + value);   // (onParameter =operation:retractHeight value= :5)
+   //if (debug) writeComment("onParameter =" + name + "= " + value);   // (onParameter =operation:retractHeight value= :5)
    name = name.replace(" ","_");  // dratted indexOF cannot have spaces in it!
    if ( (name.indexOf("retractHeight_value") >= 0 ) )   // == "operation:retractHeight value")
       {
