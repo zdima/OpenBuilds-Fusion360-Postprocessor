@@ -41,11 +41,11 @@ Changelog
 12 Nov 2021 - V1.0.28 : Added property group names, fixed default router selection, now uses permittedCommentChars  (sharmstr)
 24 Nov 2021 - V1.0.28 : Improved coolant selection, tweaked property groups, tweaked G53 generation, links for help in comments.
 21 Feb 2022 - V1.0.29 : Fix sideeffects of drill operation having rapids even when in noRapid mode by always resetting haveRapid in onSection
-10 May 2022 - V1.0.30 : Change naming convention for first file in multifile output
+10 May 2022 - V1.0.30 : Change naming convention for first file in multifile output (Sharmstr)
 */
 obversion = 'V1.0.30';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
-longDescription = description + " : Post" + obversion; // adds description to post library diaglog box
+longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
 model = "GRBL";
@@ -317,7 +317,8 @@ function rpm2dial(rpm, op)
       var speeds = [0, 10000, 14000, 18000, 23000, 27000, 32000];
       }
    else
-      { // this is Makita R0701
+      {
+      // this is Makita R0701
       var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
       }
    if (rpm < speeds[1])
@@ -400,7 +401,7 @@ function writeBlock()
 
 /**
    Thanks to nyccnc.com
-   Thanks to the Autodesk Knowledge Network for help with this at 
+   Thanks to the Autodesk Knowledge Network for help with this at
    https://knowledge.autodesk.com/support/hsm/learn-explore/caas/sfdcarticles/sfdcarticles/How-to-use-Manual-NC-options-to-manually-add-code-with-Fusion-360-HSM-CAM.html!
 */
 function onPassThrough(text)
@@ -771,7 +772,7 @@ function gotoInitial(checkit)
    if (debug) writeComment("gotoInitial end");
    }
 
-// write a G53 Z retract   
+// write a G53 Z retract
 function writeZretract()
    {
    zOutput.reset();
@@ -779,7 +780,7 @@ function writeZretract()
    writeBlock(gFormat.format(53), gMotionModal.format(0), zOutput.format(toPreciseUnit( properties.machineHomeZ, MM)));  // Retract spindle to Machine Z Home
    gMotionModal.reset();
    zOutput.reset();
-   }   
+   }
 
 
 function onSection()
@@ -791,7 +792,7 @@ function onSection()
    var maxfeedrate = section.getMaximumFeedrate();
    if (debug) writeComment("onSection " + sectionId);
    haveRapid = false; // drilling sections will have rapids even when other ops do not
-   
+
    onRadiusCompensation(); // must check every section
 
    if (isPlasma)
@@ -923,8 +924,9 @@ function onSection()
          {
          writeZretract();
          }
-      else if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
-         writeZretract();
+      else 
+         if (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number))
+            writeZretract();
 
       gotoInitial(true);
 
@@ -1059,7 +1061,7 @@ function onRapid(_x, _y, _z)
 
 function onLinear(_x, _y, _z, feed)
    {
-   //if (debug) writeComment("onLinear " + haveRapid);   
+   //if (debug) writeComment("onLinear " + haveRapid);
    if (powerOn || haveRapid)   // do not reset if power is off - for laser G0 moves
       {
       xOutput.reset();
@@ -1275,14 +1277,23 @@ function onClose()
 
 function onTerminate()
    {
-   // If we are generating multiple files, then rename first file to add # of #
-   // If you dont want to show the log file, then untick "open in Open file in NC editor"
-   if (filesToGenerate > 1) {
-     var fileIndexFormat = createFormat({ width: 2, zeropad: true, decimals: 0 });
-     var newOutput = FileSystem.replaceExtension(getOutputPath(), fileIndexFormat.format(1) + 'of' + filesToGenerate + '.' + extension);
-     FileSystem.moveFile(getOutputPath(), newOutput);
-     executeNoWait(newOutput, '', false, '');
-    }
+   // If we are generating multiple files, copy first file to add # of #
+   // Then remove first file and recreate with file list - sharmstr
+   if (filesToGenerate > 1)
+      {
+      var outputPath = getOutputPath();
+      var outputFolder = FileSystem.getFolderPath(getOutputPath());
+      var programFilename = FileSystem.getFilename(outputPath);
+      FileSystem.copyFile(outputPath, FileSystem.replaceExtension(outputPath, fileIndexFormat.format(1) + 'of' + filesToGenerate + '.' + extension));
+      FileSystem.remove(outputPath);
+      var file = new TextFile(outputFolder + "\\" + programFilename, true, "ansi");
+      file.writeln("The following gcode files were created: ");
+      for (var i = 0; i < filesToGenerate; ++i)
+         {
+         file.writeln(programName + '.' + fileIndexFormat.format(i + 1) + 'of' + filesToGenerate + '.' + extension);
+         }
+      file.close();
+      }
    }
 
 function onCommand(command)
