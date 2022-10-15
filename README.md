@@ -3,6 +3,11 @@
 Creates .nc files optimized for GRBL based Openbuilds-style machines.
 Supports router and laser operations.
 
+V1.0.31
+1. improved laser and plasma paths, esp when 'stay down' is selected
+1. laser pierce delay option when through cutting is selected
+1. Select 'LASER: use Z motions at start and end' to have full Z movement with laser and plasma cuts
+
 V1.0.25 supports plasma torch touchoff probing.
 * Read the [instructions](https://github.com/OpenBuilds/OpenBuilds-Fusion360-Postprocessor/blob/master/README-plasma.md)
 
