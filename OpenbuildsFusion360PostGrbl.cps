@@ -43,8 +43,9 @@ Changelog
 21 Feb 2022 - V1.0.29 : Fix sideeffects of drill operation having rapids even when in noRapid mode by always resetting haveRapid in onSection
 10 May 2022 - V1.0.30 : Change naming convention for first file in multifile output (Sharmstr)
 xx Sep 2022 - V1.0.31 : better laser, with pierce option if cutting
+06 Dec 2022 - V1.0.32 : fix long comments that were getting extra brackets
 */
-obversion = 'V1.0.31';
+obversion = 'V1.0.32';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -440,6 +441,9 @@ function myMachineConfig()
       }
    }
 
+// Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
+// In order to make it simple, I replace everything which is not A-Z, 0-9, space, : , .
+// Finally put everything between () as this is the way GRBL & UGCS expect comments
 function formatComment(text)
    {
    return ("(" + filterText(String(text), permittedCommentChars) + ")");
@@ -447,27 +451,24 @@ function formatComment(text)
 
 function writeComment(text)
    {
-   // Remove special characters which could confuse GRBL : $, !, ~, ?, (, )
-   // In order to make it simple, I replace everything which is not A-Z, 0-9, space, : , .
-   // Finally put everything between () as this is the way GRBL & UGCS expect comments
    // v20 - split the line so no comment is longer than 70 chars
    if (text.length > 70)
       {
       //text = String(text).replace( /[^a-zA-Z\d:=,.]+/g, " "); // remove illegal chars
-      text = formatComment(text);
+      text = filterText(text.trim(), permittedCommentChars);
       var bits = text.split(" "); // get all the words
       var out = '';
       for (i = 0; i < bits.length; i++)
          {
-         out += bits[i] + " ";
+         out += bits[i] + " "; // additional space after first line
          if (out.length > 60)           // a long word on the end can take us to 80 chars!
             {
-            writeln("(" + out.trim() + ")");
+            writeln(formatComment( out.trim() ) );
             out = "";
             }
          }
       if (out.length > 0)
-         writeln("(" + out.trim() + ")");
+         writeln(formatComment( out.trim() ) );
       }
    else
       writeln(formatComment(text));
