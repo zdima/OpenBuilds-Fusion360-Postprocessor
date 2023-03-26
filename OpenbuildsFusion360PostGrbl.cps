@@ -46,14 +46,15 @@
    06 Dec 2022 - V1.0.32 : fix long comments that were getting extra brackets
    22 Dec 2022 - V1.0.33 : refactored file naming and debugging, indented with astyle
    10 Mar 2023 - V1.0.34 : move coolant code to the spindle control line to help with restarts
+   26 Mar 2023 - V1.0.35 : plasma pierce height override,  spindle speed change always with an M3, version number display
 */
-obversion = 'V1.0.33';
+obversion = 'V1.0.35';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
 model = "GRBL";
-legal = "Copyright Openbuilds 2022";
+legal = "Copyright Openbuilds 2023";
 certificationLevel = 2;
 minimumRevision = 45892;
 
@@ -88,14 +89,16 @@ properties =
    machineHomeX : -10,            // always in millimeters
    machineHomeY : -10,
    gotoMCSatend : false,          // true will do G53 G0 x{machinehomeX} y{machinehomeY}, false will do G0 x{machinehomeX} y{machinehomeY} at end of program
-   PowerVaporise : 5,     // cutting power in percent, to vaporize plastic coatings
-   PowerThrough  : 100,  // for through cutting
-   PowerEtch     : 10,  // for etching the surface
+   PowerVaporise : 5,         // cutting power in percent, to vaporize plastic coatings
+   PowerThrough  : 100,       // for through cutting
+   PowerEtch     : 10,        // for etching the surface
    UseZ : false,           // if true then Z will be moved to 0 at beginning and back to 'retract height' at end
    UsePierce : false,      // if true && islaser && cutting use M3 and honor pierce delays, else use M4
    //plasma stuff
-   plasma_usetouchoff : false, // use probe for touchoff if true
-   plasma_touchoffOffset : 5.0, // offset from trigger point to real Z0, used in G10 line
+   plasma_usetouchoff : false,                        // use probe for touchoff if true
+   plasma_touchoffOffset : 5.0,                       // offset from trigger point to real Z0, used in G10 line
+   plasma_pierceHeightoverride: false,                // if true replace all pierce height settings with value below
+   plasma_pierceHeightValue : toPreciseUnit(10,MM),   // not forcing mm, user beware
 
    linearizeSmallArcs: true,     // arcs with radius < toolRadius have radius errors, linearize instead?
    machineVendor : "OpenBuilds",
@@ -218,6 +221,8 @@ propertyDefinitions =
    UsePierce:     {title: "LASER: Use pierce delays with M3 motion when cutting.", description: "True will use M3 commands and pierce delays, else use M4 with no delays.", group: "laserPlasma", type: "boolean"},
    plasma_usetouchoff:  {title: "PLASMA: Use Z touchoff probe routine", description: "Set to true if have a touchoff probe for Plasma.", group: "laserPlasma", type: "boolean"},
    plasma_touchoffOffset: {title: "PLASMA: Plasma touch probe offset", description: "Offset in Z at which the probe triggers, always Millimeters, always positive.", group: "laserPlasma", type: "spatial"},
+   plasma_pierceHeightoverride: {title: "PLASMA: Override the pierce height", description: "Set to true if want to always use the pierce height Z value.", group: "laserPlasma", type: "boolean"},
+   plasma_pierceHeightValue : {title: "PLASMA: Override the pierce height Z value", description: "Offset in Z for the plasma pierce height, always positive.", group: "laserPlasma", type: "spatial"},
 
    machineVendor: {
       group: "machine",
@@ -298,7 +303,7 @@ var leadinRate = 314;   // set by onParameter: the lead-in feedrate,plasma
 var cuttingMode = 'none'; // set by onParameter for laser/plasma
 var linmove = 1;        // linear move mode
 var toolRadius;         // for arc linearization
-var plasma_pierceHeight = 1; // set by onParameter from Linking|PierceClearance
+var plasma_pierceHeight = 3.14; // set by onParameter from Linking|PierceClearance
 var coolantIsOn = 0;    // set when coolant is used to we can do intelligent turn off
 var currentworkOffset = 54; // the current WCS in use, so we can retract Z between sections if needed
 var clnt = '';          // coolant code to add to spindle line
@@ -987,9 +992,15 @@ function onSection()
       if (tool.clockwise)
          {
          s = sOutput.format(tool.spindleRPM);
+         var rpmChanged = false;
+         if (s)
+            {
+            rpmChanged = !mFormat.areDifferent(3, mOutput.getCurrent() );
+            mOutput.reset();  // always output M3 if speed changes - helps with resume
+            }
          m = mOutput.format(3);
-         writeBlock(s, m, clnt);
-         if (s && !m) // means a speed change, spindle was already on, delay half the time
+         writeBlock(m, s, clnt);
+         if (rpmChanged) // means a speed change, spindle was already on, delay half the time
             onDwell(properties.spindleOnOffDelay / 2);
          }
       else
@@ -1444,7 +1455,12 @@ function onParameter(name, value)
       }
    // (onParameter =operation:pierceClearance= 1.5)    for plasma
    if (name == 'operation:pierceClearance')
-      plasma_pierceHeight = value;
+      {
+      if (properties.plasma_pierceHeightoverride)
+         plasma_pierceHeight = properties.plasma_pierceHeightValue;
+      else
+         plasma_pierceHeight = value;
+      }
    if ((name == 'action') && (value == 'pierce'))
       {
       if (debugMode) writeComment('action pierce');
