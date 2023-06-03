@@ -47,8 +47,9 @@
    22 Dec 2022 - V1.0.33 : refactored file naming and debugging, indented with astyle
    10 Mar 2023 - V1.0.34 : move coolant code to the spindle control line to help with restarts
    26 Mar 2023 - V1.0.35 : plasma pierce height override,  spindle speed change always with an M3, version number display
+   03 Jun 2023 - V1.0.36b: beta of code to recenter arcs with bad radii
 */
-obversion = 'V1.0.35';
+obversion = 'V1.0.36.beta';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -58,7 +59,7 @@ legal = "Copyright Openbuilds 2023";
 certificationLevel = 2;
 minimumRevision = 45892;
 
-debugMode=true;
+debugMode = false;
 
 extension = "gcode";                            // file extension of the gcode file
 setCodePage("ascii");                           // character set of the gcode file
@@ -66,14 +67,15 @@ setCodePage("ascii");                           // character set of the gcode fi
 
 var permittedCommentChars = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,=_-*/\\:";
 capabilities = CAPABILITY_MILLING | CAPABILITY_JET;      // intended for a CNC, so Milling, and waterjet/plasma/laser
-tolerance = spatial(0.01, MM);
+tolerance = spatial(0.002, MM);
 minimumChordLength = spatial(0.25, MM);
 minimumCircularRadius = spatial(0.125, MM);
 maximumCircularRadius = spatial(1000, MM);
 minimumCircularSweep = toRad(0.1); // was 0.01
 maximumCircularSweep = toRad(180);
 allowHelicalMoves = true;
-allowedCircularPlanes = (1 << PLANE_XY);// | (1 << PLANE_ZX) | (1 << PLANE_YZ); // only XY, ZX, and YZ planes
+allowSpiralMoves = false;
+allowedCircularPlanes = (1 << PLANE_XY) | (1 << PLANE_ZX) | (1 << PLANE_YZ); // only XY, ZX, and YZ planes
 // the above circular plane limitation appears to be a solution to the faulty arcs problem (but is not entirely)
 // an alternative is to set EITHER minimumChordLength OR minimumCircularRadius to a much larger value, like 0.5mm
 
@@ -98,7 +100,7 @@ properties =
    plasma_usetouchoff : false,                        // use probe for touchoff if true
    plasma_touchoffOffset : 5.0,                       // offset from trigger point to real Z0, used in G10 line
    plasma_pierceHeightoverride: false,                // if true replace all pierce height settings with value below
-   plasma_pierceHeightValue : toPreciseUnit(10,MM),   // not forcing mm, user beware
+   plasma_pierceHeightValue : toPreciseUnit(10, MM),  // not forcing mm, user beware
 
    linearizeSmallArcs: true,     // arcs with radius < toolRadius have radius errors, linearize instead?
    machineVendor : "OpenBuilds",
@@ -249,7 +251,7 @@ plasma_probedistance = 30;   // distance to probe down in Z, always in millimete
 plasma_proberate = 100;      // feedrate for probing, in mm/minute
 // END OF USER ADJUSTMENTS
 
-debugMode = false;
+
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
 var gFormat = createFormat({prefix: "G", decimals: 0});
 var mFormat = createFormat({prefix: "M", decimals: 0});
@@ -275,7 +277,11 @@ var jOutput = createReferenceVariable({prefix: "J", force: true}, arcFormat);
 var kOutput = createReferenceVariable({prefix: "K", force: true}, arcFormat);
 
 var gMotionModal = createModal({}, gFormat);                                  // modal group 1 // G0-G3, ...
-var gPlaneModal = createModal({onchange:function () {gMotionModal.reset();}}, gFormat); // modal group 2 // G17-19
+var gPlaneModal = createModal({onchange: function ()
+   {
+   gMotionModal.reset();
+   }
+                              }, gFormat); // modal group 2 // G17-19
 var gAbsIncModal = createModal({}, gFormat);                                  // modal group 3 // G90-91
 var gFeedModeModal = createModal({}, gFormat);                                // modal group 5 // G93-94
 var gUnitModal = createModal({}, gFormat);                                    // modal group 6 // G20-21
@@ -312,7 +318,8 @@ function toTitleCase(str)
    {
    // function to reformat a string to 'title case'
    return str.replace( /\w\S*/g, function(txt)
-      {             // /\w\S*/g    keep that format, astyle will put spaces in it
+      {
+      // /\w\S*/g    keep that format, astyle will put spaces in it
       return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
       });
    }
@@ -688,10 +695,10 @@ function onOpen()
                   (tooli.numberOfFlutes != toolj.numberOfFlutes))
                {
                error( subst(
-                     localize("Using the same tool number for different cutter geometry for operation '%1' and '%2'."),
-                     sectioni.hasParameter("operation-comment") ? sectioni.getParameter("operation-comment") : ("#" + (i + 1)),
-                     sectionj.hasParameter("operation-comment") ? sectionj.getParameter("operation-comment") : ("#" + (j + 1))
-                     ) );
+                         localize("Using the same tool number for different cutter geometry for operation '%1' and '%2'."),
+                         sectioni.hasParameter("operation-comment") ? sectioni.getParameter("operation-comment") : ("#" + (i + 1)),
+                         sectionj.hasParameter("operation-comment") ? sectionj.getParameter("operation-comment") : ("#" + (j + 1))
+                      ) );
                return;
                }
             }
@@ -892,7 +899,7 @@ function onSection()
       if (isLaser || isPlasma)
          {
          clnt = setCoolant(1) // always turn it on since plasma tool has no coolant option in fusion
-         writeComment('laser coolant ' + clnt)   
+                writeComment('laser coolant ' + clnt)
          }
       else
          clnt = setCoolant(tool.coolant); // use tool setting
@@ -1195,15 +1202,208 @@ function onLinear5D(_x, _y, _z, _a, _b, _c, feed)
    error("Tool-Rotation detected but GRBL only supports 3 Axis");
    }
 
+// this code was generated with the help of ChatGPT AI
+// calculate the centers for the 2 circles passing through both points at the given radius
+// if error then returns -9.9375 for all coordinates
+// define points as var point1 = { x: 0, y: 0 };
+// returns an array of 2 of those things
+function calculateCircleCenters(point1, point2, radius)
+   {
+   // Calculate the distance between the points
+   var distance = Math.sqrt(     Math.pow(point2.x - point1.x, 2) + Math.pow(point2.y - point1.y, 2)   );
+   if (distance > (radius * 2))
+      {
+      //-9.9375 is perfectly stored by doubles and singles and will pass an equality test
+      center1X = center1Y = center2X = center2Y = -9.9375;
+      }
+   else
+      {
+      // Calculate the midpoint between the points
+      var midpointX = (point1.x + point2.x) / 2;
+      var midpointY = (point1.y + point2.y) / 2;
+
+      // Calculate the angle between the line connecting the points and the x-axis
+      var angle = Math.atan2(point2.y - point1.y, point2.x - point1.x);
+
+      // Calculate the distance from the midpoint to the center of each circle
+      var halfChordLength = Math.sqrt(Math.pow(radius, 2) - Math.pow(distance / 2, 2));
+
+      // Calculate the centers of the circles
+      var center1X = midpointX + halfChordLength * Math.cos(angle + Math.PI / 2);
+      var center1Y = midpointY + halfChordLength * Math.sin(angle + Math.PI / 2);
+
+      var center2X = midpointX + halfChordLength * Math.cos(angle - Math.PI / 2);
+      var center2Y = midpointY + halfChordLength * Math.sin(angle - Math.PI / 2);
+      }
+
+   // Return the centers of the circles as an array of objects
+   return [
+      { x: center1X, y: center1Y },
+      { x: center2X, y: center2Y }   ];
+   }
+
+// given the 2 points and existing center, find a new, more accurate center
+// only works in x,y
+// point parameters are Vectors
+// returns a Vector point with the revised center values in x,y, ignore Z
+function newCenter(p1, p2, oldcenter, radius)
+   {
+   // inputs are vectors, convert
+   var point1 = { x: p1.x, y: p1.y };
+   var point2 = { x: p2.x, y: p2.y };
+
+   var newcenters = calculateCircleCenters(point1, point2, radius);
+   if ((newcenters[0].x == newcenters[1].x) && (newcenters[0].y == -9.9375))
+      {
+      // error in calculation, distance between points > diameter
+      return oldcenter;   
+      }
+   // now find the new center that is closest to the old center
+   //writeComment("nc1 " + newcenters[0].x + " " + newcenters[0].y);
+   nc1 = new Vector(newcenters[0].x, newcenters[0].y, 0); // note Z is not valid
+   //writeComment("nc2 " + newcenters[1].x + " " + newcenters[1].y);
+   nc2 = new Vector(newcenters[1].x, newcenters[1].y, 0);
+   d1 = Vector.diff(oldcenter, nc1).length;
+   d2 = Vector.diff(oldcenter, nc2).length;
+   if (d1 < d2)
+      return nc1;
+   else
+      return nc2;
+   }
+
+/*
+   helper for on Circular - calculates a new center for arcs with differing radii
+   returns the revised center vector
+*/   
+function ReCenter(start, end, center, radius, cp)
+   {
+      var r1,r2,diff,pdiff;
+   
+   switch (cp)
+      {
+      case PLANE_XY:
+         writeComment('recenter XY');
+         var nCenter = newCenter(start, end, center,  radius );
+         // writeComment("old center " + center.x + " , " + center.y);
+         // writeComment("new center " + nCenter.x + " , " + nCenter.y);
+         center.x = nCenter.x;
+         center.y = nCenter.y;
+         center.z = (start.z + end.z) / 2.0;
+
+         r1 = Vector.diff(start, center).length;
+         r2 = Vector.diff(end, center).length;
+         if (r1 != r2)
+            {
+            diff = r1 - r2;
+            pdiff = Math.abs(diff / r1 * 100);
+            if (pdiff  > 0.01)
+               {
+               if (debugMode) writeComment("R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+               }
+            }
+         break;
+      case PLANE_ZX:
+         writeComment('recenter ZX');
+         // generate fake x,y vectors
+         var st = new Vector( start.x, start.z, 0);
+         var ed = new Vector(end.x, end.z, 0)
+         var ct = new Vector(center.x, center.z, 0);
+         var nCenter = newCenter( st, ed, ct,  radius);
+         // translate fake x,y values
+         center.x = nCenter.x;
+         center.z = nCenter.y;
+         r1 = Vector.diff(start, center).length;
+         r2 = Vector.diff(end, center).length;
+         if (r1 != r2)
+            {
+            diff = r1 - r2;
+            pdiff = Math.abs(diff / r1 * 100);
+            if (pdiff  > 0.01)
+               {
+               if (debugMode) writeComment("ZX R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+               }
+            }
+         break;
+      case PLANE_YZ:
+         writeComment('recenter YZ');
+         var st = new Vector(start.z, start.y, 0);
+         var ed = new Vector(end.z, end.y, 0)
+         var ct = new Vector(center.z, center.y, 0);
+         var nCenter = newCenter(st, ed, ct,  radius);
+         center.y = nCenter.y;
+         center.z = nCenter.x;
+         r1 = Vector.diff(start, center).length;
+         r2 = Vector.diff(end, center).length;
+         if (r1 != r2)
+            {
+            diff = r1 - r2;
+            pdiff = Math.abs(diff / r1 * 100);
+            if (pdiff  > 0.01)
+               {
+               if (debugMode) writeComment("YZ R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+               }
+            }
+         break;
+      }
+   return center;
+   }
+
 function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
    {
    var start = getCurrentPosition();
-   xOutput.reset(); // always have X and Y, Z will output if it changed
-   yOutput.reset();
+   var center = new Vector(cx, cy, cz);
+   var end = new Vector(x, y, z);
+   var cp = getCircularPlane();
+   //writeComment("cp " + cp);
 
-   // arcs smaller than bitradius always have significant radius errors, so get radius and linearize them (because we cannot change minimumCircularRadius here)
+   if (isFullCircle())
+      {
+      writeComment("full circle");
+      linearize(tolerance);
+      return;
+      }
+
+   // first fix the center 'height'
+   // for an XY plane, fix Z to be between start.z and end.z
+   switch (cp)
+      {
+      case PLANE_XY:
+         center.z = (start.z + end.z) / 2.0; // doing this fixes most arc radius lengths
+         break;
+      case PLANE_YZ:
+         // fix X
+         center.x = (start.x + end.x) / 2.0;
+         break;
+      case PLANE_ZX:
+         // fix Y
+         center.y = (start.y + end.y) / 2.0;
+         break;
+      default:
+         writeComment("no plane");
+      }
+   // check for differing radii
+   var r1 = Vector.diff(start, center).length;
+   var r2 = Vector.diff(end, center).length;
+   // if linearizing and this is small, don't bother to recenter
+   if ( !(properties.linearizeSmallArcs &&  (r1 < toolRadius)) )
+      if (r1 != r2)
+         {
+         var diff = r1 - r2;
+         var pdiff = Math.abs(diff / r1 * 100);
+         // if percentage difference too great
+         if (pdiff > 0.01)
+            {
+            // adjust center to make radii equal
+            if (debugMode) writeComment("r1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+            center = ReCenter(start, end, center, (r1 + r2) /2, cp);
+            }
+         }
+
+   // arcs smaller than bitradius always have significant radius errors, 
+   // so get radius and linearize them (because we cannot change minimumCircularRadius here)
    // note that larger arcs still have radius errors, but they are a much smaller percentage of the radius
-   var rad = Math.sqrt(Math.pow(start.x - cx, 2) + Math.pow(start.y - cy, 2));
+   // and GRBL won't care
+   var rad = Vector.diff(start,center).length;
    if (properties.linearizeSmallArcs &&  (rad < toolRadius))
       {
       if (debugMode) writeComment("linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3));
@@ -1211,48 +1411,50 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
       if (debugMode) writeComment("done");
       return;
       }
-   if (isFullCircle())
+   // not small and not a full circle, output G2 or G3
+   if ((isLaser || isPlasma) && !powerOn)
       {
-      writeComment("full circle");
-      linearize(tolerance);
-      return;
+      if (debugMode) writeComment("arc linearize rapid");
+      linearize(tolerance * 10); // this is a rapid move so tolerance can be increased for faster motion and fewer lines of code
+      if (debugMode) writeComment("arc linearize rapid done");
       }
    else
-      {
-      if ((isLaser || isPlasma) && !powerOn)
+      switch (getCircularPlane())
          {
-         if (debugMode) writeComment("arc linearize rapid");
-         linearize(tolerance * 4); // this is a rapid move so tolerance can be increased for faster motion and fewer lines of code
-         if (debugMode) writeComment("arc linearize rapid done");
-         }
-      else
-         switch (getCircularPlane())
-            {
-            case PLANE_XY:
-               if (!isLaser && !isPlasma)
-                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
-               else
-                  {
-                  zo = properties.UseZ ? zOutput.format(z) : "";
-                  writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zo, iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
-                  }
-               break;
-            case PLANE_ZX:
-               if (!isLaser)
-                  writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-               else
-                  linearize(tolerance);
-               break;
-            case PLANE_YZ:
-               if (!isLaser)
-                  writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-               else
-                  linearize(tolerance);
-               break;
-            default:
+         case PLANE_XY:
+            xOutput.reset();  // must always have X and Y
+            yOutput.reset();
+            if (!isLaser && !isPlasma)
+               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+            else
+               {
+               zo = properties.UseZ ? zOutput.format(z) : "";
+               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zo, iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+               }
+            break;
+         case PLANE_ZX:
+            if (!isLaser)
+               {
+               xOutput.reset(); // always have X and Z
+               zOutput.reset();
+               writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+               }
+            else
                linearize(tolerance);
-            }
-      }
+            break;
+         case PLANE_YZ:
+            if (!isLaser)
+               {
+               yOutput.reset(); // always have Y and Z
+               zOutput.reset();
+               writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+               }
+            else
+               linearize(tolerance);
+            break;
+         default:
+            linearize(tolerance);
+         } //switch plane
    }
 
 function onSectionEnd()
@@ -1351,7 +1553,7 @@ function onTerminate()
       var fname;
       for (var i = 0; i < filesToGenerate; ++i)
          {
-         fname = makeFileName(i+1);
+         fname = makeFileName(i + 1);
          file.writeln(fname);
          }
       file.close();
@@ -1433,7 +1635,7 @@ function onParameter(name, value)
       if (debugMode) writeComment("clearanceHeight = " + clearanceHeight);
       }
 
-   if (name.indexOf("movement:lead_in") !== -1)
+   if (name.indexOf("movement:lead_in") != -1)
       {
       leadinRate = value;
       if (debugMode && isPlasma) writeComment("leadinRate set " + leadinRate);
