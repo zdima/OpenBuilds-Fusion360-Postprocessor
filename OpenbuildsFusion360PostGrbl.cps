@@ -1425,11 +1425,11 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
             xOutput.reset();  // must always have X and Y
             yOutput.reset();
             if (!isLaser && !isPlasma)
-               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(center.x - start.x, 0), jOutput.format(center.y - start.y, 0), feedOutput.format(feed));
             else
                {
                zo = properties.UseZ ? zOutput.format(z) : "";
-               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zo, iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+               writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zo, iOutput.format(center.x - start.x, 0), jOutput.format(center.y - start.y, 0), feedOutput.format(feed));
                }
             break;
          case PLANE_ZX:
@@ -1437,7 +1437,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
                {
                xOutput.reset(); // always have X and Z
                zOutput.reset();
-               writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+               writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(center.x - start.x, 0), kOutput.format(center.z - start.z, 0), feedOutput.format(feed));
                }
             else
                linearize(tolerance);
@@ -1447,7 +1447,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
                {
                yOutput.reset(); // always have Y and Z
                zOutput.reset();
-               writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
+               writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(center.y - start.y, 0), kOutput.format(center.z - start.z, 0), feedOutput.format(feed));
                }
             else
                linearize(tolerance);
