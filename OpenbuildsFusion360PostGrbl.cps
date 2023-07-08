@@ -47,9 +47,9 @@
    22 Dec 2022 - V1.0.33 : refactored file naming and debugging, indented with astyle
    10 Mar 2023 - V1.0.34 : move coolant code to the spindle control line to help with restarts
    26 Mar 2023 - V1.0.35 : plasma pierce height override,  spindle speed change always with an M3, version number display
-   03 Jun 2023 - V1.0.36b: beta of code to recenter arcs with bad radii
+   03 Jun 2023 - V1.0.36 : code to recenter arcs with bad radii
 */
-obversion = 'V1.0.36.beta';
+obversion = 'V1.0.36';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -75,9 +75,10 @@ minimumCircularSweep = toRad(0.1); // was 0.01
 maximumCircularSweep = toRad(180);
 allowHelicalMoves = true;
 allowSpiralMoves = false;
-allowedCircularPlanes = (1 << PLANE_XY) | (1 << PLANE_ZX) | (1 << PLANE_YZ); // only XY, ZX, and YZ planes
-// the above circular plane limitation appears to be a solution to the faulty arcs problem (but is not entirely)
-// an alternative is to set EITHER minimumChordLength OR minimumCircularRadius to a much larger value, like 0.5mm
+allowedCircularPlanes = (1 << PLANE_XY); // allow only XY plane
+// if you need vertical arcs then uncomment the line below
+//allowedCircularPlanes = (1 << PLANE_XY) | (1 << PLANE_ZX) | (1 << PLANE_YZ); // allow all planes, recentering arcs solves YZ/XZ arcs
+// if you allow vertical arcs then be aware that ObCONTROL will not display the gocde correctly, but it WILL cut correctly.
 
 // user-defined properties : defaults are set, but they can be changed from a dialog box in Fusion when doing a post.
 properties =
@@ -212,7 +213,7 @@ propertyDefinitions =
    linearizeSmallArcs: {
       group: "arcs",
       title: "ARCS: Linearize Small Arcs",
-      description: "Arcs with radius < toolRadius can have mismatched radii, set this to Yes to linearize them. This solves G2/G3 radius mismatch errors.",
+      description: "Arcs with radius &lt; toolRadius can have mismatched radii, set this to Yes to linearize them. This solves G2/G3 radius mismatch errors.",
       type: "boolean",
       },
 
@@ -516,6 +517,16 @@ function writeHeader(secID)
       {
       writeComment("Laser UseZ = " + properties.UseZ);
       writeComment("Laser UsePierce = " + properties.UsePierce);
+      }
+   if (allowedCircularPlanes == 1)
+      {
+      writeln("");   
+      writeComment("Arcs are limited to the XY plane: if you want vertical arcs then edit allowedCircularPlanes in the CPS file");
+      }
+   else   
+      {
+      writeln("");   
+      writeComment("Arcs can occur on XY,YZ,ZX planes: CONTROL may not display them correctly but they will cut correctly");
       }
 
    writeln("");
@@ -1204,13 +1215,14 @@ function onLinear5D(_x, _y, _z, _a, _b, _c, feed)
 
 // this code was generated with the help of ChatGPT AI
 // calculate the centers for the 2 circles passing through both points at the given radius
+// if you ask chatgpt that ^^^ you will get incorrect code!
 // if error then returns -9.9375 for all coordinates
 // define points as var point1 = { x: 0, y: 0 };
-// returns an array of 2 of those things
+// returns an array of 2 of those things comprising the 2 centers
 function calculateCircleCenters(point1, point2, radius)
    {
    // Calculate the distance between the points
-   var distance = Math.sqrt(     Math.pow(point2.x - point1.x, 2) + Math.pow(point2.y - point1.y, 2)   );
+   var distance = Math.sqrt(  Math.pow(point2.x - point1.x, 2) + Math.pow(point2.y - point1.y, 2)  );
    if (distance > (radius * 2))
       {
       //-9.9375 is perfectly stored by doubles and singles and will pass an equality test
@@ -1244,7 +1256,7 @@ function calculateCircleCenters(point1, point2, radius)
 
 // given the 2 points and existing center, find a new, more accurate center
 // only works in x,y
-// point parameters are Vectors
+// point parameters are Vectors, this converts them to arrays for the calc
 // returns a Vector point with the revised center values in x,y, ignore Z
 function newCenter(p1, p2, oldcenter, radius)
    {
@@ -1265,6 +1277,7 @@ function newCenter(p1, p2, oldcenter, radius)
    nc2 = new Vector(newcenters[1].x, newcenters[1].y, 0);
    d1 = Vector.diff(oldcenter, nc1).length;
    d2 = Vector.diff(oldcenter, nc2).length;
+   // return the new center that is closest to the old center
    if (d1 < d2)
       return nc1;
    else
@@ -1274,6 +1287,7 @@ function newCenter(p1, p2, oldcenter, radius)
 /*
    helper for on Circular - calculates a new center for arcs with differing radii
    returns the revised center vector
+   maps arcs to XY plane, recenters, and reversemaps to return the new center in the correct plane
 */   
 function ReCenter(start, end, center, radius, cp)
    {
@@ -1282,7 +1296,7 @@ function ReCenter(start, end, center, radius, cp)
    switch (cp)
       {
       case PLANE_XY:
-         writeComment('recenter XY');
+         if (debugMode) writeComment('recenter XY');
          var nCenter = newCenter(start, end, center,  radius );
          // writeComment("old center " + center.x + " , " + center.y);
          // writeComment("new center " + nCenter.x + " , " + nCenter.y);
@@ -1303,7 +1317,7 @@ function ReCenter(start, end, center, radius, cp)
             }
          break;
       case PLANE_ZX:
-         writeComment('recenter ZX');
+         if (debugMode) writeComment('recenter ZX');
          // generate fake x,y vectors
          var st = new Vector( start.x, start.z, 0);
          var ed = new Vector(end.x, end.z, 0)
@@ -1325,7 +1339,7 @@ function ReCenter(start, end, center, radius, cp)
             }
          break;
       case PLANE_YZ:
-         writeComment('recenter YZ');
+         if (debugMode) writeComment('recenter YZ');
          var st = new Vector(start.z, start.y, 0);
          var ed = new Vector(end.z, end.y, 0)
          var ct = new Vector(center.z, center.y, 0);
@@ -1369,7 +1383,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
       {
       case PLANE_XY:
          center.z = (start.z + end.z) / 2.0; // doing this fixes most arc radius lengths
-         break;
+         break;                              // because the radius depends on the axial distance as well
       case PLANE_YZ:
          // fix X
          center.x = (start.x + end.x) / 2.0;
@@ -1384,33 +1398,33 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
    // check for differing radii
    var r1 = Vector.diff(start, center).length;
    var r2 = Vector.diff(end, center).length;
-   // if linearizing and this is small, don't bother to recenter
-   if ( !(properties.linearizeSmallArcs &&  (r1 < toolRadius)) )
-      if (r1 != r2)
+   if ( (r1 != r2) && (r1 < toolRadius) ) // always recenter small arcs
+      {
+      var diff = r1 - r2;
+      var pdiff = Math.abs(diff / r1 * 100);
+      // if percentage difference too great
+      if (pdiff > 0.01)
          {
-         var diff = r1 - r2;
-         var pdiff = Math.abs(diff / r1 * 100);
-         // if percentage difference too great
-         if (pdiff > 0.01)
-            {
-            // adjust center to make radii equal
-            if (debugMode) writeComment("r1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
-            center = ReCenter(start, end, center, (r1 + r2) /2, cp);
-            }
+         //writeComment("recenter");
+         // adjust center to make radii equal
+         if (debugMode) writeComment("r1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdiff " + pdiff );
+         center = ReCenter(start, end, center, (r1 + r2) /2, cp);
          }
+      }
 
    // arcs smaller than bitradius always have significant radius errors, 
    // so get radius and linearize them (because we cannot change minimumCircularRadius here)
    // note that larger arcs still have radius errors, but they are a much smaller percentage of the radius
    // and GRBL won't care
-   var rad = Vector.diff(start,center).length;
-   if (properties.linearizeSmallArcs &&  (rad < toolRadius))
-      {
-      if (debugMode) writeComment("linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3));
-      linearize(tolerance);
-      if (debugMode) writeComment("done");
-      return;
-      }
+   var rad = Vector.diff(start,center).length;  // radius to NEW Center if it has been calculated
+   if (rad < toPreciseUnit(2, MM))  // only for small arcs, dont need to linearize a 24mm arc on a 50mm tool
+      if (properties.linearizeSmallArcs && (rad < toolRadius))
+         {
+         if (debugMode) writeComment("linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3));
+         linearize(tolerance);
+         if (debugMode) writeComment("done");
+         return;
+         }
    // not small and not a full circle, output G2 or G3
    if ((isLaser || isPlasma) && !powerOn)
       {
@@ -1424,6 +1438,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
          case PLANE_XY:
             xOutput.reset();  // must always have X and Y
             yOutput.reset();
+            // dont need to do ioutput and joutput because they are reference variables
             if (!isLaser && !isPlasma)
                writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(center.x - start.x, 0), jOutput.format(center.y - start.y, 0), feedOutput.format(feed));
             else
@@ -1433,7 +1448,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
                }
             break;
          case PLANE_ZX:
-            if (!isLaser)
+            if (!isLaser && !isPlasma)
                {
                xOutput.reset(); // always have X and Z
                zOutput.reset();
@@ -1443,7 +1458,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
                linearize(tolerance);
             break;
          case PLANE_YZ:
-            if (!isLaser)
+            if (!isLaser && !isPlasma)
                {
                yOutput.reset(); // always have Y and Z
                zOutput.reset();
