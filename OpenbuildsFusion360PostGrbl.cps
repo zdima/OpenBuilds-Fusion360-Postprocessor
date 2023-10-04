@@ -1,4 +1,5 @@
 /*
+/*
    Custom Post-Processor for GRBL based Openbuilds-style CNC machines, router and laser-cutting
    Made possible by
    Swarfer  https://github.com/swarfer/GRBL-Post-Processor
@@ -48,8 +49,9 @@
    10 Mar 2023 - V1.0.34 : move coolant code to the spindle control line to help with restarts
    26 Mar 2023 - V1.0.35 : plasma pierce height override,  spindle speed change always with an M3, version number display
    03 Jun 2023 - V1.0.36 : code to recenter arcs with bad radii
+   04 Oct 2023 - V1.0.37 : Tape splitting
 */
-obversion = 'V1.0.36';
+obversion = 'V1.0.37';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -80,6 +82,11 @@ allowedCircularPlanes = (1 << PLANE_XY); // allow only XY plane
 //allowedCircularPlanes = (1 << PLANE_XY) | (1 << PLANE_ZX) | (1 << PLANE_YZ); // allow all planes, recentering arcs solves YZ/XZ arcs
 // if you allow vertical arcs then be aware that ObCONTROL will not display the gocde correctly, but it WILL cut correctly.
 
+// things for splitting on linecount, aka tapesplitting
+var tapelines = 0;
+var linecnt = 0;
+var forceSplit = false;
+
 // user-defined properties : defaults are set, but they can be changed from a dialog box in Fusion when doing a post.
 properties =
    {
@@ -88,6 +95,7 @@ properties =
    hasCoolant : false,            // true : machine uses the coolant output, M8 M9 will be sent. false : coolant output not connected, so no M8 M9 will be sent
    routerType : "other",
    generateMultiple: true,        // specifies if a file should be generated for each tool change
+   splitLines: 0,                 // if > 0 then split on line count (and tool change if that is also set)
    machineHomeZ : -10,            // absolute machine coordinates where the machine will move to at the end of the job - first retracting Z, then moving home X Y
    machineHomeX : -10,            // always in millimeters
    machineHomeY : -10,
@@ -184,6 +192,12 @@ propertyDefinitions =
       description: "Generate multiple files. One for each tool change.",
       type: "boolean",
       },
+   splitLines:  {
+         group: "toolChange",
+         title: "Split on line count (0 for none)",
+         description: "Split files after given number of lines, or 0 for no split on line count.",
+         type: "number",
+         },      
 
    gotoMCSatend: {
       group: "startEndPos",
@@ -420,9 +434,14 @@ function checkMinFeedrate(section, op)
       }
    }
 
+   /**
+    * write a block of gcode
+    * counts lines if tapelines is set
+    */
 function writeBlock()
    {
    writeWords(arguments);
+   if (tapelines)   linecnt++;   
    }
 
 /**
@@ -469,6 +488,21 @@ function formatComment(text)
    {
    return ("(" + filterText(String(text), permittedCommentChars) + ")");
    }
+
+/**
+ * returns the time as 'machining time 00h00m00s'
+ */
+function getMachineTime(sec)
+   {
+   var machineTimeInSeconds = sec.getCycleTime();
+   var machineTimeHours = Math.floor(machineTimeInSeconds / 3600);
+   machineTimeInSeconds = machineTimeInSeconds % 3600;
+   var machineTimeMinutes = Math.floor(machineTimeInSeconds / 60);
+   var machineTimeSeconds = Math.floor(machineTimeInSeconds % 60);
+   var machineTimeText = "  Machining time : ";
+   machineTimeText += subst(localize("%1h:%2m:%3s"), machineTimeHours, machineTimeMinutes, machineTimeSeconds);
+   return machineTimeText;
+   }   
 
 function writeComment(text)
    {
@@ -548,19 +582,29 @@ function writeHeader(secID)
       writeComment("Program Comments : " + programComment);
       }
    writeln("");
-
+   numberOfSections = getNumberOfSections();
    if (properties.generateMultiple && filesToGenerate > 1)
       {
-      writeComment(numberOfSections + " Operation" + ((numberOfSections == 1) ? "" : "s") + " in " + filesToGenerate + " files.");
-      writeComment("File List:");
-      //writeComment("  " +  FileSystem.getFilename(getOutputPath()));
-      for (var i = 0; i < filesToGenerate; ++i)
+      if (properties.splitLines > 0)
          {
-         filename = makeFileName(i + 1);
-         writeComment("  " + filename);
+         writeComment("Since we are splitting on line count we don't know how many files will be written.");   
+         writeComment("There will be at least " + filesToGenerate + " files, from the number of tools.");
+         writeComment("Files will be named like programName.01ofMany.nc")
+         writeComment(numberOfSections + " Operation" + ((numberOfSections == 1) ? "" : "s") );
+         }   
+      else
+         {
+         writeComment(numberOfSections + " Operation" + ((numberOfSections == 1) ? "" : "s") + " in " + filesToGenerate + " files.");
+         writeComment("File List:");
+         //writeComment("  " +  FileSystem.getFilename(getOutputPath()));
+         for (var i = 0; i < filesToGenerate; ++i)
+            {
+            filename = makeFileName(i + 1);
+            writeComment("  " + filename);
+            }
+         writeln("");
+         writeComment("This is file: " + sequenceNumber + " of " + filesToGenerate);
          }
-      writeln("");
-      writeComment("This is file: " + sequenceNumber + " of " + filesToGenerate);
       writeln("");
       writeComment("This file contains the following operations: ");
       }
@@ -610,7 +654,7 @@ function writeHeader(secID)
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
          if (properties.routerType != "other")
             {
-            writeComment("  Spindle : RPM = " + round(rpm, 0) + ", set router dial to " + rpm2dial(rpm, op));
+            writeComment("  Spindle : RPM = " + round(rpm, 0) + ", set " + properties.routerType + " dial to " + rpm2dial(rpm, op));
             }
          else
             {
@@ -618,22 +662,7 @@ function writeHeader(secID)
             }
          }
       checkMinFeedrate(section, op);
-      var machineTimeInSeconds = section.getCycleTime();
-      var machineTimeHours = Math.floor(machineTimeInSeconds / 3600);
-      machineTimeInSeconds = machineTimeInSeconds % 3600;
-      var machineTimeMinutes = Math.floor(machineTimeInSeconds / 60);
-      var machineTimeSeconds = Math.floor(machineTimeInSeconds % 60);
-      var machineTimeText = "  Machining time : ";
-      if (machineTimeHours > 0)
-         {
-         machineTimeText = machineTimeText + machineTimeHours + " hours " + machineTimeMinutes + " min ";
-         }
-      else
-         if (machineTimeMinutes > 0)
-            {
-            machineTimeText = machineTimeText + machineTimeMinutes + " min ";
-            }
-      machineTimeText = machineTimeText + machineTimeSeconds + " sec";
+      machineTimeText = getMachineTime(section);
       writeComment(machineTimeText);
 
       if (properties.generateMultiple && (i + 1 < numberOfSections))
@@ -676,13 +705,18 @@ function writeHeader(secID)
 
 function onOpen()
    {
+   // 3. moved to top of file
+   myMachineConfig();
+   numberOfSections = getNumberOfSections();
+   if (properties.splitLines > 0)   
+      {
+      tapelines = properties.splitLines;
+      }
+   
    if (debugMode) writeComment("onOpen");
    // Number of checks capturing fatal errors
    // 2. is RadiusCompensation not set incorrectly ?
    onRadiusCompensation();
-
-   // 3. moved to top of file
-   myMachineConfig();
 
    // 4.  checking for duplicate tool numbers with the different geometry.
    // check for duplicate tool number
@@ -727,7 +761,6 @@ function onOpen()
       alert("Warning", "Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
       }
 
-   numberOfSections = getNumberOfSections();
    writeHeader(0);
    gMotionModal.reset();
 
@@ -790,6 +823,8 @@ function gotoInitial(checkit)
    var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
    var section = getSection(sectionId);         // what is the section-object for this operation
    var maxfeedrate = section.getMaximumFeedrate();
+   var f = "";
+   
    // Rapid move to initial position, first XY, then Z, and do tool height check if needed
    forceAny();
    var initialPosition = getFramePosition(currentSection.getInitialPosition());
@@ -814,7 +849,10 @@ function gotoInitial(checkit)
    if (debugMode) writeComment("gotoInitial end");
    }
 
-// write a G53 Z retract
+/*
+ * write a G53 Z retract
+ * might need to gMotionModal.reset() before this to force output
+ */
 function writeZretract()
    {
    zOutput.reset();
@@ -839,7 +877,7 @@ function onSection()
    if (isPlasma)
       {
       if (topHeight > plasma_pierceHeight)
-         error("TOP HEIGHT MUST BE BELOW PLASMA PIERCE HEIGHT");
+         error("TOP HEIGHT MUST BE BELOW PLASMA PIERCE HEIGHT (links tab)");
       if ((topHeight <= 0) && properties.plasma_usetouchoff)
          error("TOPHEIGHT MUST BE GREATER THAN 0");
       writeComment("Plasma pierce height " + plasma_pierceHeight);
@@ -860,16 +898,39 @@ function onSection()
    //(onParameter =operation:topHeight value= 0.8)
 
    var splitHere = !isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number);
+   // to split on linecount, we need to force it here
+   if (forceSplit)
+      {
+      splitHere = true;  // will open a new file
+      writeComment('Starting new file due to line count');
+      filesToGenerate++;
+      }
 
    if (splitHere)
       {
-      sequenceNumber ++;
-      //var fileIndexFormat = createFormat({width:3, zeropad: true, decimals:0});
+      sequenceNumber++;
       var path = makeFileName(sequenceNumber);
+      if (forceSplit)
+         writeComment("Next file " + path);  
+
+      if (isRedirecting())
+         {
+         if (debugMode) writeComment("onSection: closing redirection");
+         onClose();
+         closeRedirection();
+         }
       redirectToFile(path);
       forceAll();
       writeHeader(getCurrentSectionId());
       isNewfile = true;  // trigger a spindleondelay
+      }
+   if (forceSplit)    
+      { 
+      forceAll();
+      writeComment("Continuing operation, run previous file, " + String(sequenceNumber - 1) + ", first");
+      forceSplit = false;
+      gMotionModal.reset();
+      writeZretract();
       }
 
    if (debugMode) writeComment("onSection " + sectionId);
@@ -885,11 +946,13 @@ function onSection()
    writeComment(comment);
    if (debugMode)
       writeComment("retractHeight = " + retractHeight);
+
    // Write the WCS, ie. G54 or higher.. default to WCS1 / G54 if no or invalid WCS
    if (!isFirstSection() && (currentworkOffset !=  (53 + section.workOffset)) )
       {
       writeZretract();
       }
+      
    if ((section.workOffset < 1) || (section.workOffset > 6))
       {
       alert("Warning", "Invalid Work Coordinate System. Select WCS 1..6 in SETUP:PostProcess tab. Selecting default WCS1/G54");
@@ -1199,6 +1262,12 @@ function onLinear(_x, _y, _z, feed)
 
          }
       }
+   if (linecnt > tapelines)   
+      {
+      if (debugMode) writeComment('Tapelines ' + tapelines);
+      linecnt = 0;
+      splitHere(_x,_y,_z,feed);
+      }
    }
 
 function onRapid5D(_x, _y, _z, _a, _b, _c)
@@ -1254,10 +1323,12 @@ function calculateCircleCenters(point1, point2, radius)
       { x: center2X, y: center2Y }   ];
    }
 
-// given the 2 points and existing center, find a new, more accurate center
-// only works in x,y
-// point parameters are Vectors, this converts them to arrays for the calc
-// returns a Vector point with the revised center values in x,y, ignore Z
+/** 
+ * given the 2 points and existing center, find a new, more accurate center
+ * only works in x,y
+ * point parameters are Vectors, this converts them to arrays for the calc
+ * returns a Vector point with the revised center values in x,y, ignore Z
+ */
 function newCenter(p1, p2, oldcenter, radius)
    {
    // inputs are vectors, convert
@@ -1472,13 +1543,40 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
          } //switch plane
    }
 
+/**
+ * force a file split here   
+ * params are the current cut position and feedrate
+ * TODO - set a flag and split at the next rapid move instead of instant split
+ */
+function splitHere(_x,_y,_z,_f)
+   {
+   // output footer
+   if (debugMode) writeComment('splitHere: Splitting file');
+   //onClose();
+   // open new file
+   forceSplit = true;
+   // write header
+   onSection();
+   // goto x,y
+   writeComment("Resume previous position");
+   onRapid(_x,_y,retractHeight);
+   // goto z
+   var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
+   var section = getSection(sectionId);         // what is the section-object for this operation
+   var feed = section.getParameter("operation:tool_feedPlunge");
+   writeComment("Resume previous cut depth");
+   onLinear(_x,_y,_z,feed);  // feed back to previous cut level at plunge rate
+   }   
+
 function onSectionEnd()
    {
    writeln("");
    // writeBlock(gPlaneModal.format(17));
    if (isRedirecting())
       {
-      if (!isLastSection() && properties.generateMultiple && (tool.number != getNextSection().getTool().number) || (isLastSection() && !isFirstSection()))
+      if ( (isLastSection() && isFirstSection() )   ||
+         (!isLastSection() && properties.generateMultiple && (tool.number != getNextSection().getTool().number) || (isLastSection() && !isFirstSection()))
+         )
          {
          writeln("");
          onClose();
@@ -1555,11 +1653,15 @@ function onTerminate()
    {
    // If we are generating multiple files, copy first file to add # of #
    // Then remove first file and recreate with file list - sharmstr
+   var outputPath = getOutputPath();
+   var programFilename = FileSystem.getFilename(outputPath);
    if (filesToGenerate > 1)
       {
-      var outputPath = getOutputPath();
+      
       var outputFolder = FileSystem.getFolderPath(getOutputPath());
-      var programFilename = FileSystem.getFilename(outputPath);
+      // make sure file is closed
+      if (isRedirecting())
+         closeRedirection();
       var newname = makeFileName(1);
       FileSystem.copyFile(outputPath, newname);
       FileSystem.remove(outputPath);
@@ -1571,8 +1673,46 @@ function onTerminate()
          fname = makeFileName(i + 1);
          file.writeln(fname);
          }
+      if (properties.splitLines > 0)   
+         file.writeln("A total of " + filesToGenerate + " files were written.");
       file.close();
       }
+   // from haas nextgen post, auto output a setup sheet
+/*   
+   this does not work as we cannot find the post in th epersonal post folder unless user tells us what it is
+   //var outputPath = getOutputPath();
+   warning("outputpath " + outputPath);
+   
+   //var programFilename = FileSystem.getFilename(outputPath);
+   warning("programFilename " + programFilename);
+   
+   var programSize = FileSystem.getFileSize(outputPath);
+   warning("programSize " + programSize);
+
+   var pfolder = getConfigurationPath(); // path to current post
+   warning('pfolder ' + pfolder);
+   
+   var postPath = findFile(".\\setup-sheet.cps");
+   warning("postpath " + postPath);
+
+   var intermediatePath = getIntermediatePath();
+   debug("intermediatePath " + intermediatePath);
+   var a = "--property unit " + ((unit == IN) ? "0" : "1"); // use 0 for inch and 1 for mm
+   if (programName) 
+      {
+      a += " --property programName \"'" + programName + "'\"";
+      }
+   if (programComment) 
+      {
+      a += " --property programComment \"'" + programComment + "'\"";
+      }
+   a += " --property programFilename \"'" + programFilename + "'\"";
+   a += " --property programSize \"" + programSize + "\"";
+   a += " --noeditor --log temp.log \"" + postPath + "\" \"" + intermediatePath + "\" \"" + FileSystem.replaceExtension(outputPath, "html") + "\"";
+   debug(a);
+   */
+   //execute(getPostProcessorPath(), a, false, "");
+   //executeNoWait("start", "\"" + FileSystem.replaceExtension(outputPath, "html") + "\"", false, "");
    }
 
 function onCommand(command)
@@ -1746,16 +1886,22 @@ function setCoolant(coolval)
 
 /**
    make a numbered filename
+   will adjust for splitlines setting
    @param index the number of the file, from 1
 */
 function makeFileName(index)
    {
+   debug("makefilename " + index)   
    var fullname = getOutputPath();
-   debug(fullname);
-   fullname = fullname.replace(' ', '_');
-   var filenamePath = FileSystem.replaceExtension(fullname, fileIndexFormat.format(index) + "of" + filesToGenerate + "." + extension);
+   debug("   fullname " + fullname);
+   //fullname = fullname.replace(' ', '_'); // messes with spaces in paths!
+   var filenamePath;
+   if (properties.splitLines > 0 )
+      // since we don't know the final file count, dont say the wrong thing
+      filenamePath = FileSystem.replaceExtension(fullname, fileIndexFormat.format(index) + "ofMany" + "." + extension);
+   else
+      filenamePath = FileSystem.replaceExtension(fullname, fileIndexFormat.format(index) + "of" + filesToGenerate + "." + extension);
    var filename = FileSystem.getFilename(filenamePath);
-   debug(filename);
+   debug("   filename " + filename);
    return filenamePath;
    }
-
