@@ -1,7 +1,25 @@
 # OpenBuilds Fusion360 Postprocessor
 
-Creates .nc files optimized for GRBL based Openbuilds-style machines.
-Supports router and laser operations.
+Creates .gcode files optimized for GRBL/grblHAL based Openbuilds-style machines.
+Supports router, laser and plasma operations.
+
+V1.0.37
+1. Tape splitting - allows setting a line count after which the gcode is split into a new file, see option 
+   _Split on line count (0 for none)_
+   in the Toolchange section of the post options.
+   (It will also split on toolchanges if both options are selected)
+
+V1.0.36
+1. code to recenter arcs with bad radii   - this enables use of vertical arcs in lead-in/lead-out moves
+
+V1.0.35
+1. plasma pierce height override,  spindle speed change always with an M3, version number display   
+
+V1.0.34
+1. move coolant code to the spindle control line to help with restarts in OpenBuildsCONTROL
+
+V1.0.32
+1. fix long comments that were getting extra brackets
 
 V1.0.31
 1. improved laser and plasma paths, esp when 'stay down' is selected
