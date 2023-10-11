@@ -17,6 +17,8 @@
    Custom Post-Processor for grblHAL based Openbuilds-style CNC machines
    For BlackboxX32 based on ESP32 for grblHAL with 4th axis
 
+   DOES NOT DO LASER AND PLASMA - ONLY MILLING
+
    Made possible by
    Swarfer  https://github.com/swarfer/GRBL-Post-Processor
    Sharmstr https://github.com/sharmstr/GRBL-Post-Processor
@@ -29,7 +31,7 @@
 */
 obversion = 'V0.0.1_beta';
 debugMode = false;
-description = "OB BBx32 Multi-axis Post Processor";
+description = "OB BBx32 Multi-axis Post Processor Milling Only";
 vendor = "Openbuilds";
 vendorUrl = "http://www.openbuilds.com";
 machineControl = "grblHAL 1.1 ESP32 / BlackBox X32",
@@ -38,7 +40,7 @@ model = "grblHAL";
 certificationLevel = 2;
 minimumRevision = 45892;
 
-longDescription = "MultiAxis post for Blackbox X32 with single rotary axis A or plain XYZ.";
+longDescription = "MultiAxis post for Blackbox X32 with single rotary axis A or plain XYZ - MILLING ONLY.";
 
 extension = "gcode";
 setCodePage("ascii");
