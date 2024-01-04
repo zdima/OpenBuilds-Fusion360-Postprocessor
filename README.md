@@ -3,6 +3,10 @@
 Creates .gcode files optimized for GRBL/grblHAL based Openbuilds-style machines.
 Supports router, laser and plasma operations.
 
+V1.0.38 and V0.0.2_beta
+1. Main post : Simple probing, each axis on its own, and XY corner, for BB4x with 3D probe, and machine simulation.
+1. X32 4th axis beta post: machine simulation enabled.
+
 V1.0.37
 1. Tape splitting - allows setting a line count after which the gcode is split into a new file, see option 
    _Split on line count (0 for none)_
@@ -44,6 +48,7 @@ V1.0.18 now includes laser operations.
 
 ### Credits ###
 
-1. @swarfer David the Swarfer (lead maintainer)
-1. @sharmstr - multifile output
-1. @Strooom - Initial work
+1. @swarfer David the Swarfer (lead maintainer).
+1. @sharmstr - multifile output.
+1. @Strooom - Initial work.
+1. @AutoDesk - for the example posts and excellent Fusion360 software.

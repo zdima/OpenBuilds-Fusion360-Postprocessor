@@ -27,14 +27,15 @@
 
    Changelog
    xx/Dec/2022 - V0.0.1     : Initial version (Swarfer)
+   Jan 2024 - V0.0.2b : machine simulation
 
 */
-obversion = 'V0.0.1_beta';
+obversion = 'V0.0.2_beta';
 debugMode = false;
 description = "OB BBx32 Multi-axis Post Processor Milling Only";
 vendor = "Openbuilds";
 vendorUrl = "http://www.openbuilds.com";
-machineControl = "grblHAL 1.1 ESP32 / BlackBox X32",
+machineControl = "grblHAL 1.1 ESP32 / BlackBox X32 XYZA",
 legal = "Copyright (C) 2012-2023 by Autodesk, Inc. and OpenBuilds.com";
 model = "grblHAL";
 certificationLevel = 2;
@@ -461,18 +462,21 @@ var multiAxisFeedrate;
 */
 function activateMachine()
    {
-   if (debugMode) writeComment("activateMachine");
+   if (debugMode) writeComment("DEBUG activateMachine");
    // disable unsupported rotary axes output
    if (!machineConfiguration.isMachineCoordinate(0) && (typeof aOutput != "undefined"))
       {
+      if (debugMode) writeComment("DEBUG activateMachine A disable");
       aOutput.disable();
       }
    if (!machineConfiguration.isMachineCoordinate(1) && (typeof bOutput != "undefined"))
       {
+      if (debugMode) writeComment("DEBUG activateMachine B disable");
       bOutput.disable();
       }
    if (!machineConfiguration.isMachineCoordinate(2) && (typeof cOutput != "undefined"))
       {
+      if (debugMode) writeComment("DEBUG activateMachine C disable");
       cOutput.disable();
       }
 
@@ -481,7 +485,8 @@ function activateMachine()
                           (typeof useMultiAxisFeatures != "undefined" ? useMultiAxisFeatures : false);
    useABCPrepositioning = getProperty("useABCPrepositioning") != undefined ? getProperty("useABCPrepositioning") :
                           (typeof useABCPrepositioning != "undefined" ? useABCPrepositioning : false);
-
+   if (debugMode) writeComment("DEBUG useMultiAxisFeatures " + useMultiAxisFeatures);
+   if (debugMode) writeComment("DEBUG useABCPrepositioning " + useABCPrepositioning);
    // don't need to modify any settings if 3-axis machine
    if (!machineConfiguration.isMultiAxisConfiguration())
       {
@@ -524,6 +529,7 @@ function activateMachine()
    // so we need to optimize each section individually
    if (machineConfiguration.isHeadConfiguration() && compensateToolLength)
       {
+      writeComment('compensating')   ;
       for (var i = 0; i < getNumberOfSections(); ++i)
          {
          var section = getSection(i);
@@ -536,6 +542,7 @@ function activateMachine()
       }
    else     // tables and rotary heads with TCP support can be optimized with a single call
       {
+      if (debugMode) writeComment('optimizing machine angles')   ;
       optimizeMachineAngles2(OPTIMIZE_AXIS);
       }
    }
@@ -545,7 +552,7 @@ function activateMachine()
 */
 function defineMachine()
    {
-   if (debugMode) writeComment("defineMachine");
+   if (debugMode) writeComment("DEBUG defineMachine");
    if (!receivedMachineConfiguration)   // CAM provided machine configuration takes precedence
       {
       writeComment("Using hardcoded machine XYZ - if you want A-axis then define a suitable machine in Fusion360");
@@ -559,7 +566,6 @@ function defineMachine()
       machineConfiguration.setVendor("OpenBuilds");
       machineConfiguration.setModel("BBx32");
       machineConfiguration.setDescription(description);
-
 
       // multiaxis settings
       if (machineConfiguration.isHeadConfiguration())
@@ -784,15 +790,13 @@ var lengthCompensationActive = false;
 /** Disables length compensation if currently active or if forced. */
 function disableLengthCompensation(force)
    {
-   /*
       if (lengthCompensationActive || force)
-      {
-      if (debugMode) writeComment('disableLengthCompensation');
-      validate(retracted, "Cannot cancel length compensation if the machine is not fully retracted.");
-      writeBlock(gFormat.format(49));
-      lengthCompensationActive = false;
-      }
-   */
+         {
+         if (debugMode) writeComment('DEBUG disableLengthCompensation');
+         validate(retracted, "Cannot cancel length compensation if the machine is not fully retracted.");
+         writeBlock(gFormat.format(49));
+         lengthCompensationActive = false;
+         }
    }
 
 var currentWorkPlaneABC = undefined;
@@ -1002,7 +1006,7 @@ function onParameter(name, value)
    if ( (name.indexOf("retractHeight_value") >= 0 ) )   // == "operation:retractHeight value")
       {
       retractHeight = value;
-      if (debugMode) writeComment("onParameter:retractHeight = " + retractHeight);
+      if (debugMode) writeComment("DEBUG onParameter:retractHeight = " + retractHeight);
       }      
    }
 
@@ -1094,7 +1098,7 @@ function onSection()
       }
    // DTS below this goes into new file
    writeln("");
-   if (debugMode) writeComment("onSection " + (sectionId + 1));
+   if (debugMode) writeComment("DEBUG onSection " + (sectionId + 1));
    // Insert a small comment section to identify the related G-Code in a large multi-operations file
    var comment = "Operation " + (sectionId + 1) + " of " + nmbrOfSections;
    if (hasParameter("operation-comment"))
@@ -1103,7 +1107,7 @@ function onSection()
       }
    writeComment(comment);
    if (debugMode)
-      writeComment("retractHeight = " + retractHeight);
+      writeComment("DEBUG retractHeight = " + retractHeight);
 
    // output section notes
    if (getProperty("showNotes"))
@@ -1113,7 +1117,7 @@ function onSection()
 
    if (insertToolCall && getProperty("useToolChange"))
       {
-      if (debugMode) writeComment('insert tool call');
+      if (debugMode) writeComment('DEBUG insert tool call');
       forceWorkPlane();
 
       setCoolant(COOLANT_OFF);
@@ -1180,7 +1184,7 @@ function onSection()
          warning(localize("Spindle speed exceeds maximum value."));
          }
       var rpmchanged = !isFirstSection() && rpmFormat.areDifferent(spindleSpeed, sOutput.getCurrent())
-      if (debugMode) writeComment('rpmchanged ' + rpmchanged);
+      if (debugMode) writeComment('DEBUG rpmchanged ' + rpmchanged);
       s = sOutput.format(spindleSpeed);
       if (s)
          mFormat.format(1); // always output M if S changed
@@ -1231,6 +1235,7 @@ function onSection()
       {
       //if (debugMode) writeComment("1146");
       var lengthOffset = tool.lengthOffset;
+      //if (debugMode) writeComment("lengthoffset " + zOutput.format(lengthOffset));
       if (lengthOffset > numberOfToolSlots)
          {
          error(localize("Length offset out of range."));
@@ -1249,9 +1254,9 @@ function onSection()
          writeBlock(
             gAbsIncModal.format(90),
             gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y)
-         );
+            );
          //writeBlock(gMotionModal.format(0), gFormat.format(getOffsetCode()), zOutput.format(initialPosition.z), hFormat.format(lengthOffset));
-         writeBlock(gMotionModal.format(0), gFormat.format(getOffsetCode()), zOutput.format(initialPosition.z));
+         //writeBlock(gMotionModal.format(0), gFormat.format(getOffsetCode()), zOutput.format(initialPosition.z), ' ; 1253');
          //if (debugMode) writeComment("1162 end");
          }
       else
@@ -1262,13 +1267,13 @@ function onSection()
             gMotionModal.format(0),
             gFormat.format(getOffsetCode()), xOutput.format(initialPosition.x),
             yOutput.format(initialPosition.y),
-            zOutput.format(initialPosition.z), hFormat.format(lengthOffset));
+            zOutput.format(initialPosition.z), hFormat.format(lengthOffset), ' ; 1264');
          }
       lengthCompensationActive = false; // DTS force false
       }
    else
       {
-      if (debugMode) writeComment('1185');
+      if (debugMode) writeComment('DEBUG 1185');
       writeBlock(
          gAbsIncModal.format(90),
          gMotionModal.format(0),
@@ -1282,7 +1287,7 @@ function onSection()
 
 function onSectionEnd()
    {
-   if (debugMode) writeComment("onSectionEnd begin " + getCurrentSectionId() + 1)   ;
+   if (debugMode) writeComment("DEBUG onSectionEnd begin " + getCurrentSectionId() + 1)   ;
    writeBlock(gPlaneModal.format(17));
    if (!isLastSection() && (getNextSection().getTool().coolant != tool.coolant))
       {
@@ -1296,13 +1301,13 @@ function onSectionEnd()
          {
          writeln("");
          onCommand(COMMAND_STOP_SPINDLE);
-         if (debugMode) writeComment('onsectionend calling onclose');
+         if (debugMode) writeComment('DEBUG onsectionend calling onclose');
          onClose();
          closeRedirection();
          }
       }
    forceAny();
-   if (debugMode) writeComment("onSectionEnd end " + getCurrentSectionId() + 1)   ;   
+   if (debugMode) writeComment("DEBUG onSectionEnd end " + getCurrentSectionId() + 1)   ;   
    }
 
 function onDwell(seconds)
@@ -1625,7 +1630,7 @@ function onLinear(_x, _y, _z, feed)
             linmove = 1;
          else
             linmove = 0;
-         if (debugMode && (linmove == 0)) writeComment("NOrapid " + _z + ' ' + retractHeight);
+         if (debugMode && (linmove == 0)) writeComment("DEBUG NOrapid " + _z + ' ' + retractHeight);
          }
       writeBlock(gMotionModal.format(linmove), x, y, z, f);
       }
@@ -1634,12 +1639,12 @@ function onLinear(_x, _y, _z, feed)
          {
          if (getNextRecord().isMotion())   // try not to output feed without motion
             {
-            if (debugMode) writeComment('onlinear feedoutput reset')   ;
+            if (debugMode) writeComment('DEBUG onlinear feedoutput reset')   ;
             feedOutput.reset(); // force feed on next line
             }
          else
             {
-               if (debugMode) writeComment('onLinear feedoutput')   ;
+               if (debugMode) writeComment('DEBUG onLinear feedoutput')   ;
             writeBlock(gMotionModal.format(1), f);
             }
          }
@@ -1814,7 +1819,7 @@ function ReCenter(start, end, center, radius, cp)
             pdiff = Math.abs(diff / r1 * 100);
             if (pdiff  > 0.01)
                {
-               if (debugMode) writeComment("R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+               if (debugMode) writeComment("DEBUG Recenter R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
                }
             }
          break;
@@ -1836,7 +1841,7 @@ function ReCenter(start, end, center, radius, cp)
             pdiff = Math.abs(diff / r1 * 100);
             if (pdiff  > 0.01)
                {
-               if (debugMode) writeComment("ZX R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+               if (debugMode) writeComment("DEBUG ZX R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
                }
             }
          break;
@@ -1856,7 +1861,7 @@ function ReCenter(start, end, center, radius, cp)
             pdiff = Math.abs(diff / r1 * 100);
             if (pdiff  > 0.01)
                {
-               if (debugMode) writeComment("YZ R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+               if (debugMode) writeComment("DEBUG YZ R1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
                }
             }
          break;
@@ -1920,7 +1925,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
             {
             //writeComment("recenter");
             // adjust center to make radii equal
-            if (debugMode) writeComment("r1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
+            if (debugMode) writeComment("DEBUG r1 " + r1 + " r2 " + r2 + " d " + (r1 - r2) + " pdoff " + pdiff );
             center = ReCenter(start, end, center, (r1 + r2) /2, cp);
             }
          }
@@ -1935,9 +1940,9 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
       if (linearizeSmallArcs && (rad < toolRadius))
          {
          debugMode = true;   
-         if (debugMode) writeComment("linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3) + ' plane=' + cp);
+         if (debugMode) writeComment("DEBUG linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3) + ' plane=' + cp);
          linearize(tolerance);
-         if (debugMode) writeComment("done");
+         if (debugMode) writeComment("DEBUG done");
          debugMode = false;
          return;
          }
@@ -1976,7 +1981,7 @@ var forceCoolant = false;
 
 function setCoolant(coolant)
    {
-   if (debugMode) writeComment('setCoolant ' + coolant);
+   if (debugMode) writeComment('DEBUG setCoolant ' + coolant);
    var coolantCodes = getCoolantCodes(coolant);
    if (Array.isArray(coolantCodes))
       {
@@ -2109,27 +2114,27 @@ function onCommand(command)
    switch (command)
       {
       case COMMAND_STOP:
-         if (debugMode) writeComment('oncommand stop' + command);
+         if (debugMode) writeComment('DEBUG oncommand stop' + command);
          writeBlock(mFormat.format(0));
          forceSpindleSpeed = true;
          forceCoolant = true;
          return;
       case COMMAND_OPTIONAL_STOP:
-         if (debugMode) writeComment('oncommand optstop' + command);
+         if (debugMode) writeComment('DEBUG oncommand optstop' + command);
          writeBlock(mFormat.format(1));
          forceSpindleSpeed = true;
          forceCoolant = true;
          return;
       case COMMAND_COOLANT_ON:
-         if (debugMode) writeComment('oncommand coolon' + command);
+         if (debugMode) writeComment('DEBUG oncommand coolon' + command);
          setCoolant(COOLANT_FLOOD);
          return;
       case COMMAND_COOLANT_OFF:
-         if (debugMode) writeComment('oncommand cooloff ' + command);
+         if (debugMode) writeComment('DEBUG oncommand cooloff ' + command);
          setCoolant(COOLANT_OFF);
          return;
       case COMMAND_START_SPINDLE:
-         if (debugMode) writeComment('oncommand start ' + command);
+         if (debugMode) writeComment('DEBUG oncommand start ' + command);
          onCommand(tool.clockwise ? COMMAND_SPINDLE_CLOCKWISE : COMMAND_SPINDLE_COUNTERCLOCKWISE);
          return;
       case COMMAND_LOCK_MULTI_AXIS:
@@ -2151,7 +2156,7 @@ function onCommand(command)
    //writeComment('oncommand mcode ' + mcode + " " + stringId);
    if (mcode != undefined)
       {
-      if (debugMode) writeComment('oncommand mapped ' + stringId + "=" + mcode);
+      if (debugMode) writeComment('DEBUG oncommand mapped ' + stringId + "=" + mcode);
       writeBlock(mFormat.format(mcode));
       }
    else
@@ -2164,7 +2169,7 @@ function onCommand(command)
 /** Output block to do safe retract and/or move to home position. */
 function writeRetract()
    {
-   if (debugMode) writeComment('writeRetract start');
+   if (debugMode) writeComment('DEBUG writeRetract start');
    var words = []; // store all retracted axes in an array
    var retractAxes = new Array(false, false, false);
    var method = getProperty("safePositionMethod");
@@ -2219,7 +2224,7 @@ function writeRetract()
          }
       if (method == "clearanceHeight")         
          {
-         if (debugMode) writeComment('Retract to initial.z');
+         if (debugMode) writeComment('DEBUG Retract to initial.z');
          var section = getSection(0);         // what is the section-object for this operation
          var initialPosition = getFramePosition(section.getInitialPosition());         
          _zHome  = initialPosition.z;
@@ -2283,7 +2288,7 @@ function writeRetract()
             return;
          }
       }
-      if (debugMode) writeComment('writeRetract end');
+      if (debugMode) writeComment('DEBUG writeRetract end');
    }
 
 // Start of onRewindMachine logic
@@ -2329,7 +2334,8 @@ function onReturnFromSafeRetractPosition(_x, _y, _z)
    // reinstate TCP / tool length compensation
    if (!lengthCompensationActive)
       {
-      writeBlock(gFormat.format(getOffsetCode()), hFormat.format(tool.lengthOffset));
+      writeComment('DEBUG tool offset  2334');
+      writeBlock(gFormat.format(getOffsetCode()), hFormat.format(tool.lengthOffset), ' ; 2331');
       lengthCompensationActive = true;
       }
 
@@ -2349,7 +2355,7 @@ function onReturnFromSafeRetractPosition(_x, _y, _z)
 function getOffsetCode()
    {
    //var offsetCode = 43.1;
-   var offsetCode = 0;
+   var offsetCode = 43.1;
    /* DTS grblHAL has no offset code
       if (currentSection.isMultiAxis() || (!useMultiAxisFeatures && !currentSection.isZOriented()))
       {
@@ -2368,7 +2374,7 @@ function getOffsetCode()
 
 function onClose()
    {
-   if (debugMode) writeComment('onclose');
+   if (debugMode) writeComment('DEBUG onclose');
    setCoolant(COOLANT_OFF);
 
    writeRetract(Z);
@@ -2381,12 +2387,12 @@ function onClose()
    onImpliedCommand(COMMAND_END);
    onCommand(COMMAND_STOP_SPINDLE);
    writeBlock(mFormat.format(30)); // stop program, spindle stop, coolant off
-   if (debugMode) writeComment('onclose end');
+   if (debugMode) writeComment('DEBUG onclose end');
    }
 
 function writeHeader(secID)
    {
-   if (debugMode) writeComment("Header start " + secID + 1);
+   if (debugMode) writeComment("DEBUG Header start " + secID + 1);
 
    numberOfSections = getNumberOfSections();
 
@@ -2456,7 +2462,7 @@ function writeHeader(secID)
       }
    else
       {
-      if (debugMode) writeComment("generate single with toolchanges 2099");
+      if (debugMode) writeComment("DEBUG generate single with toolchanges 2465");
       writeComment(numberOfSections + " Operation" + ((numberOfSections == 1) ? "" : "s") + " : in 1 file");
       }
 
@@ -2535,7 +2541,7 @@ function writeHeader(secID)
          break;
       }
    writeRetract(Z);
-   if (debugMode) writeComment("Header end");
+   if (debugMode) writeComment("DEBUG Header end");
    writeln("");
    }
 
@@ -2588,7 +2594,7 @@ function checkforDuplicatetools()
    if (getProperty('useToolChange'))
       filesToGenerate = 1;
    if (debugMode)
-      writeComment("files to Generate = " + filesToGenerate);
+      writeComment("DEBUG files to Generate = " + filesToGenerate);
    }
 
 function rpm2dial(rpm, op)

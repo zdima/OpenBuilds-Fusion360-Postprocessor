@@ -1,5 +1,4 @@
 /*
-/*
    Custom Post-Processor for GRBL based Openbuilds-style CNC machines, router and laser-cutting
    Made possible by
    Swarfer  https://github.com/swarfer/GRBL-Post-Processor
@@ -50,8 +49,9 @@
    26 Mar 2023 - V1.0.35 : plasma pierce height override,  spindle speed change always with an M3, version number display
    03 Jun 2023 - V1.0.36 : code to recenter arcs with bad radii
    04 Oct 2023 - V1.0.37 : Tape splitting
+      Nov 2023 - V1.0.38 : Simple probing, each axis on its own, and xy corner, for BB4x with 3D probe, and machine simulation
 */
-obversion = 'V1.0.37';
+obversion = 'V1.0.38';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -68,7 +68,7 @@ setCodePage("ascii");                           // character set of the gcode fi
 //setEOL(CRLF);                                 // end-of-line type : use CRLF for windows
 
 var permittedCommentChars = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,=_-*/\\:";
-capabilities = CAPABILITY_MILLING | CAPABILITY_JET;      // intended for a CNC, so Milling, and waterjet/plasma/laser
+capabilities = CAPABILITY_MILLING | CAPABILITY_JET | CAPABILITY_INSPECTION | CAPABILITY_MACHINE_SIMULATION;      // intended for a CNC, so Milling, and waterjet/plasma/laser
 tolerance = spatial(0.002, MM);
 minimumChordLength = spatial(0.25, MM);
 minimumCircularRadius = spatial(0.125, MM);
@@ -269,6 +269,7 @@ plasma_proberate = 100;      // feedrate for probing, in mm/minute
 
 // creation of all kinds of G-code formats - controls the amount of decimals used in the generated G-Code
 var gFormat = createFormat({prefix: "G", decimals: 0});
+var gPFormat = createFormat({prefix: "G", decimals: 1}); // for probing commands
 var mFormat = createFormat({prefix: "M", decimals: 0});
 
 var xyzFormat = createFormat({decimals: (unit == MM ? 3 : 4)});
@@ -276,6 +277,7 @@ var abcFormat = createFormat({decimals: 3, forceDecimal: true, scale: DEG});
 var arcFormat = createFormat({decimals: (unit == MM ? 3 : 4)});
 var feedFormat = createFormat({decimals: 0});
 var rpmFormat = createFormat({decimals: 0});
+var pFormat = createFormat({decimals: 0});
 var secFormat = createFormat({decimals: 1, forceDecimal: true}); // seconds
 //var taperFormat = createFormat({decimals:1, scale:DEG});
 
@@ -284,6 +286,7 @@ var yOutput = createVariable({prefix: "Y", force: false}, xyzFormat);
 var zOutput = createVariable({prefix: "Z", force: false}, xyzFormat); // dont need Z every time
 var feedOutput = createVariable({prefix: "F"}, feedFormat);
 var sOutput = createVariable({prefix: "S", force: false}, rpmFormat);
+var pWord = createVariable({prefix: "P", force: true}, pFormat);
 var mOutput = createVariable({force: false}, mFormat); // only use for M3/4/5
 
 // for arcs
@@ -292,6 +295,7 @@ var jOutput = createReferenceVariable({prefix: "J", force: true}, arcFormat);
 var kOutput = createReferenceVariable({prefix: "K", force: true}, arcFormat);
 
 var gMotionModal = createModal({}, gFormat);                                  // modal group 1 // G0-G3, ...
+var gProbeModal = createModal({onchange: function ()  { gMotionModal.reset(); }, force: true }, gPFormat);                                  
 var gPlaneModal = createModal({onchange: function ()
    {
    gMotionModal.reset();
@@ -328,6 +332,143 @@ var plasma_pierceHeight = 3.14; // set by onParameter from Linking|PierceClearan
 var coolantIsOn = 0;    // set when coolant is used to we can do intelligent turn off
 var currentworkOffset = 54; // the current WCS in use, so we can retract Z between sections if needed
 var clnt = '';          // coolant code to add to spindle line
+var feedProbeLink = 1000;     // probe linking moves feedrate
+var feedProbeMeasure =  102;  // probing feedrate
+var probe_output_work_offset = 0; // the WCS to update when probing
+
+// Start of machine configuration logic
+var compensateToolLength = false; // add the tool length to the pivot distance for nonTCP rotary heads
+
+// internal variables, do not change
+var receivedMachineConfiguration;
+var operationSupportsTCP;
+var multiAxisFeedrate;
+
+function activateMachine() {
+  // disable unsupported rotary axes output
+  if (!machineConfiguration.isMachineCoordinate(0) && (typeof aOutput != "undefined")) {
+    aOutput.disable();
+  }
+  if (!machineConfiguration.isMachineCoordinate(1) && (typeof bOutput != "undefined")) {
+    bOutput.disable();
+  }
+  if (!machineConfiguration.isMachineCoordinate(2) && (typeof cOutput != "undefined")) {
+    cOutput.disable();
+  //machineConfiguration.setControl(properties.machineControl);
+  }
+
+  // setup usage of multiAxisFeatures
+  useMultiAxisFeatures = getProperty("useMultiAxisFeatures") != undefined ? getProperty("useMultiAxisFeatures") :
+    (typeof useMultiAxisFeatures != "undefined" ? useMultiAxisFeatures : false);
+  useABCPrepositioning = getProperty("useABCPrepositioning") != undefined ? getProperty("useABCPrepositioning") :
+    (typeof useABCPrepositioning != "undefined" ? useABCPrepositioning : false);
+
+  if (!machineConfiguration.isMultiAxisConfiguration()) {
+    return; // don't need to modify any settings for 3-axis machines
+  }
+
+  // save multi-axis feedrate settings from machine configuration
+  var mode = machineConfiguration.getMultiAxisFeedrateMode();
+  var type = mode == FEED_INVERSE_TIME ? machineConfiguration.getMultiAxisFeedrateInverseTimeUnits() :
+    (mode == FEED_DPM ? machineConfiguration.getMultiAxisFeedrateDPMType() : DPM_STANDARD);
+  multiAxisFeedrate = {
+    mode     : mode,
+    maximum  : machineConfiguration.getMultiAxisFeedrateMaximum(),
+    type     : type,
+    tolerance: mode == FEED_DPM ? machineConfiguration.getMultiAxisFeedrateOutputTolerance() : 0,
+    bpwRatio : mode == FEED_DPM ? machineConfiguration.getMultiAxisFeedrateBpwRatio() : 1
+  };
+
+  // setup of retract/reconfigure  TAG: Only needed until post kernel supports these machine config settings
+  if (receivedMachineConfiguration && machineConfiguration.performRewinds()) {
+    safeRetractDistance = machineConfiguration.getSafeRetractDistance();
+    safePlungeFeed = machineConfiguration.getSafePlungeFeedrate();
+    safeRetractFeed = machineConfiguration.getSafeRetractFeedrate();
+  }
+  if (typeof safeRetractDistance == "number" && getProperty("safeRetractDistance") != undefined && getProperty("safeRetractDistance") != 0) {
+    safeRetractDistance = getProperty("safeRetractDistance");
+  }
+
+  if (machineConfiguration.isHeadConfiguration()) {
+    compensateToolLength = typeof compensateToolLength == "undefined" ? false : compensateToolLength;
+  }
+
+  if (machineConfiguration.isHeadConfiguration() && compensateToolLength) {
+    for (var i = 0; i < getNumberOfSections(); ++i) {
+      var section = getSection(i);
+      if (section.isMultiAxis()) {
+        machineConfiguration.setToolLength(getBodyLength(section.getTool())); // define the tool length for head adjustments
+        section.optimizeMachineAnglesByMachine(machineConfiguration, OPTIMIZE_AXIS);
+      }
+    }
+  } else {
+    optimizeMachineAngles2(OPTIMIZE_AXIS);
+  }
+}
+
+function getBodyLength(tool) {
+  for (var i = 0; i < getNumberOfSections(); ++i) {
+    var section = getSection(i);
+    if (tool.number == section.getTool().number) {
+      return section.getParameter("operation:tool_overallLength", tool.bodyLength + tool.holderLength);
+    }
+  }
+  return tool.bodyLength + tool.holderLength;
+}
+
+function defineMachine() {
+  var useTCP = true;
+  if (false) { // note: setup your machine here
+    var aAxis = createAxis({coordinate:0, table:true, axis:[1, 0, 0], range:[-120, 120], preference:1, tcp:useTCP});
+    var cAxis = createAxis({coordinate:2, table:true, axis:[0, 0, 1], range:[-360, 360], preference:0, tcp:useTCP});
+    machineConfiguration = new MachineConfiguration(aAxis, cAxis);
+
+    setMachineConfiguration(machineConfiguration);
+    if (receivedMachineConfiguration) {
+      warning(localize("The provided CAM machine configuration is overwritten by the postprocessor."));
+      receivedMachineConfiguration = false; // CAM provided machine configuration is overwritten
+    }
+  }
+
+  if (!receivedMachineConfiguration) {
+    // multiaxis settings
+    if (machineConfiguration.isHeadConfiguration()) {
+      machineConfiguration.setVirtualTooltip(false); // translate the pivot point to the virtual tool tip for nonTCP rotary heads
+    }
+
+    // retract / reconfigure
+    var performRewinds = false; // set to true to enable the rewind/reconfigure logic
+    if (performRewinds) {
+      machineConfiguration.enableMachineRewinds(); // enables the retract/reconfigure logic
+      safeRetractDistance = (unit == IN) ? 1 : 25; // additional distance to retract out of stock, can be overridden with a property
+      safeRetractFeed = (unit == IN) ? 20 : 500; // retract feed rate
+      safePlungeFeed = (unit == IN) ? 10 : 250; // plunge feed rate
+      machineConfiguration.setSafeRetractDistance(safeRetractDistance);
+      machineConfiguration.setSafeRetractFeedrate(safeRetractFeed);
+      machineConfiguration.setSafePlungeFeedrate(safePlungeFeed);
+      var stockExpansion = new Vector(toPreciseUnit(0.1, IN), toPreciseUnit(0.1, IN), toPreciseUnit(0.1, IN)); // expand stock XYZ values
+      machineConfiguration.setRewindStockExpansion(stockExpansion);
+    }
+
+    // multi-axis feedrates
+    if (machineConfiguration.isMultiAxisConfiguration()) {
+      machineConfiguration.setMultiAxisFeedrate(
+        useTCP ? FEED_FPM : FEED_INVERSE_TIME,
+        9999.99, // maximum output value for inverse time feed rates
+        INVERSE_MINUTES, // INVERSE_MINUTES/INVERSE_SECONDS or DPM_COMBINATION/DPM_STANDARD
+        0.5, // tolerance to determine when the DPM feed has changed
+        1.0 // ratio of rotary accuracy to linear accuracy for DPM calculations
+      );
+      setMachineConfiguration(machineConfiguration);
+    }
+
+    /* home positions */
+    // machineConfiguration.setHomePositionX(toPreciseUnit(0, IN));
+    // machineConfiguration.setHomePositionY(toPreciseUnit(0, IN));
+    // machineConfiguration.setRetractPlane(toPreciseUnit(0, IN));
+  }
+}
+// End of machine configuration logic ======================================================================
 
 function toTitleCase(str)
    {
@@ -346,6 +487,8 @@ function rpm2dial(rpm, op)
    // array which maps spindle speeds to router dial settings,
    // according to Makita RT0700 Manual : 1=10000, 2=12000, 3=17000, 4=22000, 5=27000, 6=30000
    // according to Dewalt 611 Manual : 1=16000, 2=18200, 3=20400, 4=22600, 5=24800, 6=27000
+   if (isProbeOperation())      
+      return 1;
 
    if (properties.routerType == "Dewalt")
       {
@@ -361,6 +504,7 @@ function rpm2dial(rpm, op)
          // this is Makita R0701
          var speeds = [0, 10000, 12000, 17000, 22000, 27000, 30000];
          }
+
    if (rpm < speeds[1])
       {
       alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.");
@@ -540,7 +684,7 @@ function writeHeader(secID)
 
    var productName = getProduct();
    writeComment("Made in : " + productName);
-   writeComment("G-Code optimized for " + myMachine.getControl() + " controller");
+   writeComment("G-Code optimized for " + properties.machineControl + " controller");
    writeComment(description);
    cpsname = FileSystem.getFilename(getConfigurationPath());
    writeComment("Post-Processor : " + cpsname + " " + obversion );
@@ -651,17 +795,28 @@ function writeHeader(secID)
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.jetDiameter) + unitstr);
       else
          {
-         writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
-         if (properties.routerType != "other")
-            {
-            writeComment("  Spindle : RPM = " + round(rpm, 0) + ", set " + properties.routerType + " dial to " + rpm2dial(rpm, op));
-            }
+         if (getToolTypeName( tool.type) == 'probe')
+            writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
          else
             {
-            writeComment("  Spindle : RPM = " + round(rpm, 0));
-            }
+            writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " " + tool.numberOfFlutes + " Flutes, Diam = " + xyzFormat.format(tool.diameter) + unitstr + ", Len = " + tool.fluteLength.toFixed(2) + unitstr);
+            if (isProbeOperation()) 
+               {
+               writeComment('Probing, no dial to set')   ;
+               }
+            else
+               if (properties.routerType != "other")
+                  {
+                  writeComment("  Spindle : RPM = " + round(rpm, 0) + ", set " + properties.routerType + " dial to " + rpm2dial(rpm, op));
+                  }
+               else
+                  {
+                  writeComment("  Spindle : RPM = " + round(rpm, 0));
+                  }
+            }      
          }
-      checkMinFeedrate(section, op);
+      if (section.strategy != 'probe')
+         checkMinFeedrate(section, op);
       machineTimeText = getMachineTime(section);
       writeComment(machineTimeText);
 
@@ -705,8 +860,17 @@ function writeHeader(secID)
 
 function onOpen()
    {
+
+   receivedMachineConfiguration = machineConfiguration.isReceived();
+   if (typeof defineMachine == "function") 
+      {
+      defineMachine(); // hardcoded machine configuration
+      }
+   activateMachine(); // enable the machine optimizations and settings
+    
+
    // 3. moved to top of file
-   myMachineConfig();
+   //myMachineConfig();
    numberOfSections = getNumberOfSections();
    if (properties.splitLines > 0)   
       {
@@ -870,7 +1034,8 @@ function onSection()
    var section = getSection(sectionId);         // what is the section-object for this operation
    var tool = section.getTool();
    var maxfeedrate = section.getMaximumFeedrate();
-   haveRapid = false; // drilling sections will have rapids even when other ops do not
+   var amProbing = false;
+   haveRapid = false; // drilling sections will have rapids even when other ops do not, and so do probe routines
 
    onRadiusCompensation(); // must check every section
 
@@ -879,7 +1044,7 @@ function onSection()
       if (topHeight > plasma_pierceHeight)
          error("TOP HEIGHT MUST BE BELOW PLASMA PIERCE HEIGHT (links tab)");
       if ((topHeight <= 0) && properties.plasma_usetouchoff)
-         error("TOPHEIGHT MUST BE GREATER THAN 0");
+         error("TOPHEIGHT MUST BE GREATER THAN 0 (heights tab)");
       writeComment("Plasma pierce height " + plasma_pierceHeight);
       writeComment("Plasma topHeight " + topHeight);
       }
@@ -968,12 +1133,13 @@ function onSection()
    writeBlock(gAbsIncModal.format(90));  // Set to absolute coordinates
 
    // If the machine has coolant, write M8/M7 or M9 on spindle control line
+   //if probing ensure coolant is off
    if (properties.hasCoolant)
       {
       if (isLaser || isPlasma)
          {
-         clnt = setCoolant(1) // always turn it on since plasma tool has no coolant option in fusion
-                writeComment('laser coolant ' + clnt)
+         clnt = setCoolant(1); // always turn it on since plasma tool has no coolant option in fusion
+         writeComment('laser coolant ' + clnt);
          }
       else
          clnt = setCoolant(tool.coolant); // use tool setting
@@ -1041,6 +1207,13 @@ function onSection()
          isPlasma = true;
          //writeBlock(mOutput.format(cutmode), sOutput.format(power));
          break;
+      case TOOL_PROBE:
+         amProbing = true;
+         writeComment('Tool is a 3D Probe');
+         clnt = setCoolant(0);
+         writeBlock(clnt);
+         clnt = '';
+         break;
       default:
          //writeComment("tool.type = " + tool.type); // all milling tools
          isPlasma = isLaser = false;
@@ -1070,40 +1243,47 @@ function onSection()
          sOutput.reset();
          mOutput.reset();
          }
-      if (tool.clockwise)
+      if (amProbing)   
          {
-         s = sOutput.format(tool.spindleRPM);
-         var rpmChanged = false;
-         if (s)
-            {
-            rpmChanged = !mFormat.areDifferent(3, mOutput.getCurrent() );
-            mOutput.reset();  // always output M3 if speed changes - helps with resume
-            }
-         m = mOutput.format(3);
-         writeBlock(m, s, clnt);
-         if (rpmChanged) // means a speed change, spindle was already on, delay half the time
-            onDwell(properties.spindleOnOffDelay / 2);
+         m = mOutput.format(5);   // stop the spindle
+         writeBlock(m);
+         m = '';  // prevent spindle delay
          }
       else
-         if (properties.spindleTwoDirections)
+         if (tool.clockwise)
             {
             s = sOutput.format(tool.spindleRPM);
-            m = mOutput.format(4);
-            writeBlock(s, m, clnt);
+            var rpmChanged = false;
+            if (s)
+               {
+               rpmChanged = !mFormat.areDifferent(3, mOutput.getCurrent() );
+               mOutput.reset();  // always output M3 if speed changes - helps with resume
+               }
+            m = mOutput.format(3);
+            writeBlock(m, s, clnt);
+            if (rpmChanged) // means a speed change, spindle was already on, delay half the time
+               onDwell(properties.spindleOnOffDelay / 2);
             }
          else
-            {
-            alert("Error", "Counter-clockwise Spindle Operation found, but your spindle does not support this");
-            error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
-            return;
-            }
+            if (properties.spindleTwoDirections)
+               {
+               s = sOutput.format(tool.spindleRPM);
+               m = mOutput.format(4);
+               writeBlock(s, m, clnt);
+               }
+            else
+               {
+               alert("Error", "Counter-clockwise Spindle Operation found, but your spindle does not support this");
+               error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
+               return;
+               }
       // spindle on delay if needed
       if (m && (isFirstSection() || isNewfile))
          onDwell(properties.spindleOnOffDelay);
-
       }
    else
       {
+         // laser or plasma
       if (properties.UseZ)
          if (isFirstSection() || (properties.generateMultiple && (tool.number != getPreviousSection().getTool().number)) )
             {
@@ -1111,7 +1291,6 @@ function onSection()
             gotoInitial(false);
             }
       }
-
 
    forceXYZ();
 
@@ -1559,7 +1738,7 @@ function splitHere(_x,_y,_z,_f)
    onSection();
    // goto x,y
    writeComment("Resume previous position");
-   onRapid(_x,_y,retractHeight);
+   invokeOnRapid(_x,_y,retractHeight);
    // goto z
    var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
    var section = getSection(sectionId);         // what is the section-object for this operation
@@ -1777,34 +1956,34 @@ function onCommand(command)
 function onParameter(name, value)
    {
    //onParameter('operation:keepToolDown', 0)
-   if (debugMode) writeComment("onParameter =" + name + "= " + value);   // (onParameter =operation:retractHeight value= :5)
+   //if (debugMode) writeComment("onParameter =" + name + "= " + value);   // (onParameter =operation:retractHeight value= :5)
    name = name.replace(" ", "_"); // dratted indexOF cannot have spaces in it!
    if ( (name.indexOf("retractHeight_value") >= 0 ) )   // == "operation:retractHeight value")
       {
       retractHeight = value;
-      if (debugMode) writeComment("retractHeight = " + retractHeight);
+      if (debugMode) writeComment("onparameter - retractHeight = " + retractHeight);
       }
    if (name.indexOf("operation:clearanceHeight_value") >= 0)
       {
       clearanceHeight = value;
-      if (debugMode) writeComment("clearanceHeight = " + clearanceHeight);
+      if (debugMode) writeComment("onparameter - clearanceHeight = " + clearanceHeight);
       }
 
    if (name.indexOf("movement:lead_in") != -1)
       {
       leadinRate = value;
-      if (debugMode && isPlasma) writeComment("leadinRate set " + leadinRate);
+      if (debugMode && isPlasma) writeComment("onparameter - leadinRate set " + leadinRate);
       }
 
    if (name.indexOf("operation:topHeight_value") >= 0)
       {
       topHeight = value;
-      if (debugMode && isPlasma) writeComment("topHeight set " + topHeight);
+      if (debugMode && isPlasma) writeComment("onparameter - topHeight set " + topHeight);
       }
    if (name.indexOf('operation:cuttingMode') >= 0)
       {
       cuttingMode = value;
-      if (debugMode) writeComment("cuttingMode set " + cuttingMode);
+      if (debugMode) writeComment("onparameter - cuttingMode set " + cuttingMode);
       if (cuttingMode.indexOf('cut') >= 0) // simplify later logic, auto/low/medium/high are all 'cut'
          cuttingMode = 'cut';
       if (cuttingMode.indexOf('auto') >= 0)
@@ -1827,7 +2006,27 @@ function onParameter(name, value)
          writeBlock( gMotionModal.format(1), zOutput.format(topHeight), feedOutput.format(leadinRate) );
          gMotionModal.reset();
          }
-
+      }
+   if (name == 'operation:tool_feedProbeLink')
+      {
+      feedProbeLink = value;
+      if (debugMode) writeComment("onparameter - feedPRobeLink set " + feedProbeLink);
+      }
+   if (name == 'operation:tool_feedProbeMeasure')
+      {
+      feedProbeMeasure = value;   
+      if (debugMode) writeComment("onparameter - feedProbeMeasure set " + feedProbeMeasure);
+      }
+   if (name == 'operation:probeWorkOffset')
+      {
+      //writeComment('override wcs ' + value)   ;
+      if (value > 0)
+         warning('You set a probe *Overide Driving WCS* but I dont know how to do that yet');   
+      }
+   if (name == 'probe-output-work-offset')
+      {
+      probe_output_work_offset = value;
+      if (debugMode) writeComment("onparameter - probe_output_work_offset set " + probe_output_work_offset);
       }
    }
 
@@ -1905,3 +2104,241 @@ function makeFileName(index)
    debug("   filename " + filename);
    return filenamePath;
    }
+
+function onCycle()
+   {
+   //writeComment('onCycle')   ;
+   writeBlock(gPlaneModal.format(17));
+   }
+
+function onCycleEnd()
+   {
+   //writeComment('onCycleEnd');
+   if (isProbeOperation())
+      {
+      zOutput.reset();
+      gMotionModal.reset();
+      //writeZretract();
+      }   
+   }      
+
+   // probe X from left or right
+function probeX(x,y,z)
+   {
+      var dir = 0;
+
+   writeComment('probeX : ' + x + " " + y + " " + z);   
+   switch(cycle.approach1) 
+      {
+      case "positive":  // probing +Y toward stock
+         writeComment('probe X positive');
+         dir = 1;
+         break;
+      case "negative": /// probing -y toward stock
+         writeComment('probe X negative');
+         dir = -1;
+         break;
+      }
+   // current position half way along Y,  -x/+x away from stock by probeClearance+tradius, Z=cycle.retract
+   var _z = zOutput.format(z); // probe retract height
+   writeBlock(gMotionModal.format(0), _z);
+   writeBlock(gAbsIncModal.format(91));  // all relative moves
+   // move Z down to cycle depth
+   _z = zOutput.format(-cycle.depth);
+   writeBlock(_z);
+   // probe probeClearnace + overtravel in dir
+   var _x = xOutput.format( dir * (cycle.probeClearance + cycle.probeOvertravel) );
+   var _f = feedOutput.format(cycle.feedrate);
+   writeBlock(gProbeModal.format(38.2), _x, _f, " ; probe fast");
+   // retract a little
+   writeBlock(gMotionModal.format(0), xOutput.format(-dir * cycle.probeOvertravel) ," ; retract");
+   //reprobe slower
+   var _f = feedOutput.format(feedProbeMeasure);
+   writeBlock(gProbeModal.format(38.2), _x, _f, " ; probe slow");
+   // setzero
+   _p = pWord.format(probe_output_work_offset);
+   writeBlock(gMotionModal.format(10), "L20", _p, xOutput.format(-dir * toolRadius));
+   // move X away a bit, relative!
+   _x = xOutput.format(-dir * cycle.probeClearance);
+   writeBlock(gMotionModal.format(0), _x);   
+   // G90
+   writeBlock(gAbsIncModal.format(90));
+   // retract Y and  Z to cycleYZ 
+   _z = zOutput.format(z);
+   writeBlock(gMotionModal.format(0), xOutput.format(x), _z);
+   writeComment('probeX finished');
+   }   
+
+function probeY(x,y,z)
+   {        //move to Y-cycle.probeClearance   feedrate(tool_feedProbeLink)
+      var dir = 0;
+
+   writeComment('probeY : ' + x + " " + y + " " + z);   
+   switch(cycle.approach1) 
+      {
+      case "positive":  // probing +Y toward stock
+         writeComment('probe Y positive');
+         dir = 1;
+         break;
+      case "negative": /// probing -y toward stock
+         writeComment('probe Y negative');
+         dir = -1;
+         break;
+      }
+   // current position half way along X,  -y away from stock by probeClearance+radius, Z=cycle.retract
+   var _z = zOutput.format(z); // probre retract height
+   writeBlock(gMotionModal.format(0), _z);
+   writeBlock(gAbsIncModal.format(91));  // all relative moves
+   // move Z down to cycle depth
+   _z = zOutput.format(-cycle.depth);
+   writeBlock(_z);
+   // probe probeClearnace + overtravel in dir
+   var _y = yOutput.format( dir * (cycle.probeClearance + cycle.probeOvertravel) );
+   var _f = feedOutput.format(cycle.feedrate);
+   writeBlock(gProbeModal.format(38.2), _y, _f, " ; probe fast");
+   // retract a little
+   writeBlock(gMotionModal.format(0), yOutput.format(-dir * cycle.probeOvertravel) ," ; retract");
+   //reprobe slower
+   var _f = feedOutput.format(feedProbeMeasure);
+   writeBlock(gProbeModal.format(38.2), _y, _f, " ; probe slow");
+   // setzero
+   _p = pWord.format(probe_output_work_offset);
+   writeBlock(gMotionModal.format(10), "L20", _p, yOutput.format(-dir * toolRadius));
+   // move Y away a bit, relative!
+   _y = yOutput.format(-dir * cycle.probeClearance);
+   writeBlock(gMotionModal.format(0), _y);   
+   // G90
+   writeBlock(gAbsIncModal.format(90));
+   // retract Y and  Z to cycleYZ 
+   _z = zOutput.format(z);
+   writeBlock(gMotionModal.format(0), yOutput.format(y), _z);
+   writeComment('probeY finished');
+   }
+
+// probe Z - always negative?
+function probeZ(x,y,z)   
+   {
+   writeComment('probeZ: ' + x + " " + y + " " + z);         
+   // we are at nominalZ + cycle.clearance, center of stock
+   // probe down by -(cycle.clearance + cycle.probeOverTravel)
+   writeBlock(gAbsIncModal.format(91));  // all relative moves
+   var _z = zOutput.format(-(cycle.clearance + cycle.probeOvertravel));
+   var _f = feedOutput.format(cycle.feedrate);
+   // probe fast
+   writeBlock(gProbeModal.format(38.2), _z, _f, " ; probe fast");
+   // retract
+   _z = zOutput.format(cycle.probeOvertravel);
+   writeBlock(gMotionModal.format(0) , _z);
+   // reprobe slow
+   _z = zOutput.format(-(cycle.clearance + cycle.probeOvertravel));
+   _f = feedOutput.format(feedProbeMeasure);
+   writeBlock(gProbeModal.format(38.2), _z, _f, " ; probe slow");
+   // set WCS
+   _p = pWord.format(probe_output_work_offset);
+   writeBlock(gMotionModal.format(10), "L20", _p, zOutput.format(0));
+   // raise Z relative
+   _z = zOutput.format(cycle.retract);
+   writeBlock(gMotionModal.format(0) , _z);
+   writeBlock(gAbsIncModal.format(90));  // absolute
+   _z = zOutput.format(cycle.clearance);
+   writeBlock(gMotionModal.format(0) , _z);
+   writeComment('probe Z end');
+   }
+
+function onCyclePoint(x, y, z)
+   {
+   //writeComment('onCyclePoint: ' + x + " " + y + " " + z);
+   switch (cycleType)
+      {
+      case "probing-x":
+         writeComment('probing-x');
+         probeX(x,y,z);
+         break;
+      case "probing-y":
+         writeComment('probing-y');
+         probeY(x,y,z);
+         break;
+      case "probing-z":
+         writeComment('probing-z');
+         probeZ(x,y,z);
+         break;
+      case "probing-xy-outer-corner":
+         writeComment("probing-xy-outer-corner start");
+         // do this by using probex and probey
+         // we are at -clearance,-clearance,clearance
+         // position for X probe
+         writeBlock(gMotionModal.format(0), yOutput.format(cycle.probeClearance));
+         probeX(x,cycle.probeClearance,z);
+         invokeOnRapid(x,y,z);
+         // position for Y probe
+         writeBlock(gMotionModal.format(0), xOutput.format(cycle.probeClearance));
+         probeY(cycle.probeClearance,y,z);
+         invokeOnRapid(x,y,cycle.clearance);
+         writeComment("probing-xy-outer-corner complete");
+         break;
+      case "probing-xy-circular-boss":
+         writeComment('probing-xy-circular-boss');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-circular-hole":
+         writeComment('probing-xy-circular-hole');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-circular-partial-boss":
+         writeComment('probing-xy-circular-partial-boss');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-circular-partial-hole":
+         writeComment('probing-xy-circular-partial-hole');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-circular-hole-with-island":
+         writeComment('probing-xy-circular-hole-with-island');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-circular-partial-hole-with-island":
+         writeComment('probing-xy-circular-partial-hole-with-island');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-rectangular-boss":
+         writeComment('probing-xy-rectangular-boss');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-rectangular-hole":
+         writeComment('probing-xy-rectangular-hole');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-xy-rectangular-hole-with-island":
+         writeComment('probing-xy-rectangular-hole-with-island');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-x-wall":
+         writeComment('probing-x-wall');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-x-channel":
+         writeComment('probing-x-channel');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-x-channel-with-island":
+         writeComment('probing-x-channel-with-island');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-y-wall":
+         writeComment('probing-y-wall');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-y-channel":
+         writeComment('probing-y-channel');
+         warning(cycleType + ' not supported in this version');
+         break;
+      case "probing-y-channel-with-island":
+         writeComment('probing-y-channel-with-island');
+         warning(cycleType + ' not supported in this version');
+         break;
+      default:
+         warning("cycle not supported at all : " + cycleType);
+         return;
+      }
+   }
+
