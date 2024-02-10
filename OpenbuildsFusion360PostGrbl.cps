@@ -50,8 +50,9 @@
    03 Jun 2023 - V1.0.36 : code to recenter arcs with bad radii
    04 Oct 2023 - V1.0.37 : Tape splitting
       Nov 2023 - V1.0.38 : Simple probing, each axis on its own, and xy corner, for BB4x with 3D probe, and machine simulation
+   10 Feb 3024 - V1.0.39 : Add missing drill cycles, missing because probing failed to expand unhandled cycles
 */
-obversion = 'V1.0.38';
+obversion = 'V1.0.39';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -278,7 +279,7 @@ var arcFormat = createFormat({decimals: (unit == MM ? 3 : 4)});
 var feedFormat = createFormat({decimals: 0});
 var rpmFormat = createFormat({decimals: 0});
 var pFormat = createFormat({decimals: 0});
-var secFormat = createFormat({decimals: 1, forceDecimal: true}); // seconds
+var secFormat = createFormat({decimals: 3, forceDecimal: true}); // seconds
 //var taperFormat = createFormat({decimals:1, scale:DEG});
 
 var xOutput = createVariable({prefix: "X", force: false}, xyzFormat);
@@ -2107,13 +2108,13 @@ function makeFileName(index)
 
 function onCycle()
    {
-   //writeComment('onCycle')   ;
+   if (debugMode) writeComment('onCycle')   ;
    writeBlock(gPlaneModal.format(17));
    }
 
 function onCycleEnd()
    {
-   //writeComment('onCycleEnd');
+   if (debugMode) writeComment('onCycleEnd');
    if (isProbeOperation())
       {
       zOutput.reset();
@@ -2122,7 +2123,7 @@ function onCycleEnd()
       }   
    }      
 
-   // probe X from left or right
+// probe X from left or right
 function probeX(x,y,z)
    {
       var dir = 0;
@@ -2245,9 +2246,13 @@ function probeZ(x,y,z)
    writeComment('probe Z end');
    }
 
+   /*
+      handle sprobe operations since there are many of them and only some can be supported on BlackBox 4X
+      Remember to expand unsupported cycles
+   */
 function onCyclePoint(x, y, z)
    {
-   //writeComment('onCyclePoint: ' + x + " " + y + " " + z);
+   if (debugMode) writeComment('onCyclePoint: ' + x + " " + y + " " + z);
    switch (cycleType)
       {
       case "probing-x":
@@ -2336,8 +2341,27 @@ function onCyclePoint(x, y, z)
          writeComment('probing-y-channel-with-island');
          warning(cycleType + ' not supported in this version');
          break;
+      case "counter-boring"   :  // counterbore with dwell - the expansion does not print the P word with milliseconds
+         writeComment('Counterboring');
+         var _x = xOutput.format(x);
+         var _y = yOutput.format(y);
+         zOutput.reset();
+         var hclr = zOutput.format(cycle.clearance);  // clearance height
+         var hret  = zOutput.format(cycle.retract);   // retract height
+         var _z = zOutput.format(z);                  // drill depth
+         var dwell = "P" + secFormat.format(cycle.dwell);  // dwell length in seconds
+         var feed = feedOutput.format(cycle.feedrate);
+         if (debugMode) writeComment('counter-boring cycle '+_x+_y+_z + dwell+feed);
+         writeBlock(gMotionModal.format(0), _x,_y);   // G0 to xy
+         writeBlock(gMotionModal.format(0), hret);    // G0 to rertractheight
+         writeBlock(gMotionModal.format(1),_z,feed);  // G1 to drill depth
+         if (cycle.dwell > 0)
+            writeBlock(gFormat.format(4), dwell);     // dwell
+         writeBlock(gMotionModal.format(0), hclr);    // G0 to clearance height
+         break;
       default:
-         warning("cycle not supported at all : " + cycleType);
+         if (debugMode) writeComment('Expanding cycle ' + cycleType);
+         expandCyclePoint(x, y, z);
          return;
       }
    }

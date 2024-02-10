@@ -1331,6 +1331,7 @@ function onCycle()
    writeBlock(gPlaneModal.format(17));
    }
 
+   // return formatted x,y,z,R for drill cycles
 function getCommonCycle(x, y, z, r)
    {
    forceXYZ();
@@ -1511,7 +1512,7 @@ function onCyclePoint(x, y, z)
             );
             break;
          case "manual-boring": // todo unsupport
-            writeComment("manua boring");
+            writeComment("manual boring");
             writeBlock(
                gRetractModal.format(98), gAbsIncModal.format(90), gCycleModal.format(88),
                getCommonCycle(x, y, z, cycle.retract),
