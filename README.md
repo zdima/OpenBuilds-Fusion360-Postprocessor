@@ -3,6 +3,9 @@
 Creates .gcode files optimized for GRBL/grblHAL based Openbuilds-style machines.
 Supports router, laser and plasma operations.
 
+V1.0.39
+1. fix missing drill cycles
+
 V1.0.38 and V0.0.2_beta
 1. Main post : Simple probing, each axis on its own, and XY corner, for BB4x with 3D probe, and machine simulation.
 1. X32 4th axis beta post: machine simulation enabled.
