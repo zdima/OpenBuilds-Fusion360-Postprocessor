@@ -3,6 +3,12 @@
 Creates .gcode files optimized for GRBL/grblHAL based Openbuilds-style machines.
 Supports router, laser and plasma operations.
 
+V1.0.40
+1. force G0 position after plasma probe
+1. fix plasma linearization of small arcs to avoid GRBL bug in arc after probe
+1. fix pierceClearance and pierceHeight
+1. fix plasma kerfWidth to toolRadius calculation
+
 V1.0.39
 1. fix missing drill cycles
 

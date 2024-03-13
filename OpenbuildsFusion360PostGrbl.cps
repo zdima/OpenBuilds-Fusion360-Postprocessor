@@ -51,14 +51,15 @@
    04 Oct 2023 - V1.0.37 : Tape splitting
       Nov 2023 - V1.0.38 : Simple probing, each axis on its own, and xy corner, for BB4x with 3D probe, and machine simulation
    10 Feb 3024 - V1.0.39 : Add missing drill cycles, missing because probing failed to expand unhandled cycles
+   13 Mar 2024 - V1.0.40 : force position after plasma probe, fix plasma linearization of small arcs to avoid GRBL bug in arc after probe, fix pierceClearance and pierceHeight, fix plasma kerfWidth
 */
-obversion = 'V1.0.39';
+obversion = 'V1.0.40';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
 vendorUrl = "https://openbuilds.com";
 model = "GRBL";
-legal = "Copyright Openbuilds 2023";
+legal = "Copyright Openbuilds 2024";
 certificationLevel = 2;
 minimumRevision = 45892;
 
@@ -1042,17 +1043,23 @@ function onSection()
 
    if (isPlasma)
       {
+      //DAF Mar2024 - pierceclearance is not the pierceheight, that is defined for the tool
+      if (properties.plasma_pierceHeightoverride)
+         plasma_pierceHeight = properties.plasma_pierceHeightValue;
+      else
+         plasma_pierceHeight = tool.pierceHeight; // NOT pierceClearance!
+      // now we can do a valid height check
       if (topHeight > plasma_pierceHeight)
-         error("TOP HEIGHT MUST BE BELOW PLASMA PIERCE HEIGHT (links tab)");
+         error("TOP HEIGHT MUST BE BELOW PLASMA TOOL PIERCE HEIGHT (links tab)");
       if ((topHeight <= 0) && properties.plasma_usetouchoff)
          error("TOPHEIGHT MUST BE GREATER THAN 0 (heights tab)");
-      writeComment("Plasma pierce height " + plasma_pierceHeight);
-      writeComment("Plasma topHeight " + topHeight);
+      writeComment("Plasma pierce height " + round(plasma_pierceHeight,3));
+      writeComment("Plasma topHeight " + round(topHeight,3));
       }
    if (isLaser || isPlasma)
       {
-      // fake the radius else the arcs are too small before being linearized
-      toolRadius = tool.diameter * 4;
+      // fake the radius larger else the arcs are too small before being linearized since kerfwidth is very small compared to normal tools
+      toolRadius = tool.kerfWidth * 3;
       }
    else
       {
@@ -1668,7 +1675,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
    // note that larger arcs still have radius errors, but they are a much smaller percentage of the radius
    // and GRBL won't care
    var rad = Vector.diff(start,center).length;  // radius to NEW Center if it has been calculated
-   if (rad < toPreciseUnit(2, MM))  // only for small arcs, dont need to linearize a 24mm arc on a 50mm tool
+   if ( (rad < toPreciseUnit(2, MM)) || isPlasma)  // only for small arcs, dont need to linearize a 24mm arc on a 50mm tool
       if (properties.linearizeSmallArcs && (rad < toolRadius))
          {
          if (debugMode) writeComment("linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3));
@@ -1936,6 +1943,12 @@ function onCommand(command)
                   if (debugMode) writeComment("touch offset "  + xyzFormat.format(properties.plasma_touchoffOffset) );
                   writeBlock( gMotionModal.format(10), "L20", zOutput.format(toPreciseUnit(-properties.plasma_touchoffOffset, MM)) );
                   feedOutput.reset();
+                  // force a G0 to existing position after the probe because this appears to avoid a GRBL bug in small arcs when arcing
+                  // from an existing position after probing.
+                  xOutput.reset();
+                  yOutput.reset();
+                  var cpos = getCurrentPosition();
+                  writeBlock(gMotionModal.format(0), xOutput.format(cpos.x), yOutput.format(cpos.y), " ; force position after probe");
                   }
                // move to pierce height
                if (debugMode)
@@ -1991,13 +2004,23 @@ function onParameter(name, value)
          cuttingMode = 'cut';
       }
    // (onParameter =operation:pierceClearance= 1.5)    for plasma
-   if (name == 'operation:pierceClearance')
-      {
-      if (properties.plasma_pierceHeightoverride)
-         plasma_pierceHeight = properties.plasma_pierceHeightValue;
-      else
-         plasma_pierceHeight = value;
-      }
+   // if (name == 'operation:pierceClearance')
+   //    {
+   //    if (properties.plasma_pierceHeightoverride)
+   //       plasma_pierceHeight = properties.plasma_pierceHeightValue;
+   //    else
+   //       {
+   //       var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
+   //       if (sectionId > -1)
+   //          {
+   //          writeComment("sectionid " + sectionId);
+   //          var section = getSection(sectionId);         // what is the section-object for this operation
+   //          var tool = section.getTool();                // get the tool
+   //          plasma_pierceHeight = tool.pierceHeight; // NOT pierceClearance!
+   //          writeComment('onparameter pierceHeight ' + plasma_pierceHeight );
+   //          }
+   //       }
+   //    }
    if ((name == 'action') && (value == 'pierce'))
       {
       if (debugMode) writeComment('action pierce');
@@ -2143,16 +2166,16 @@ function probeX(x,y,z)
    // current position half way along Y,  -x/+x away from stock by probeClearance+tradius, Z=cycle.retract
    var _z = zOutput.format(z); // probe retract height
    writeBlock(gMotionModal.format(0), _z);
-   writeBlock(gAbsIncModal.format(91));  // all relative moves
+   writeBlock(gAbsIncModal.format(91), " ; relative moves");  // all relative moves
    // move Z down to cycle depth
    _z = zOutput.format(-cycle.depth);
    writeBlock(_z);
-   // probe probeClearnace + overtravel in dir
+   // probe probeClearance + overtravel in dir
    var _x = xOutput.format( dir * (cycle.probeClearance + cycle.probeOvertravel) );
    var _f = feedOutput.format(cycle.feedrate);
    writeBlock(gProbeModal.format(38.2), _x, _f, " ; probe fast");
    // retract a little
-   writeBlock(gMotionModal.format(0), xOutput.format(-dir * cycle.probeOvertravel) ," ; retract");
+   writeBlock(gMotionModal.format(0), xOutput.format(-dir * (cycle.probeOvertravel + toolRadius) ) ," ; retract");
    //reprobe slower
    var _f = feedOutput.format(feedProbeMeasure);
    writeBlock(gProbeModal.format(38.2), _x, _f, " ; probe slow");
@@ -2163,7 +2186,7 @@ function probeX(x,y,z)
    _x = xOutput.format(-dir * cycle.probeClearance);
    writeBlock(gMotionModal.format(0), _x);   
    // G90
-   writeBlock(gAbsIncModal.format(90));
+   writeBlock(gAbsIncModal.format(90), " ; absolute moves");
    // retract Y and  Z to cycleYZ 
    _z = zOutput.format(z);
    writeBlock(gMotionModal.format(0), xOutput.format(x), _z);
@@ -2353,7 +2376,7 @@ function onCyclePoint(x, y, z)
          var feed = feedOutput.format(cycle.feedrate);
          if (debugMode) writeComment('counter-boring cycle '+_x+_y+_z + dwell+feed);
          writeBlock(gMotionModal.format(0), _x,_y);   // G0 to xy
-         writeBlock(gMotionModal.format(0), hret);    // G0 to rertractheight
+         writeBlock(gMotionModal.format(0), hret);    // G0 to retractheight
          writeBlock(gMotionModal.format(1),_z,feed);  // G1 to drill depth
          if (cycle.dwell > 0)
             writeBlock(gFormat.format(4), dwell);     // dwell

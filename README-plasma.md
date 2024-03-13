@@ -4,7 +4,7 @@
 * Select a plasma tool and adjust the kerf width to suite your machine.
 * Make sure that the stock is the same thickness as the model, make sure no stock is added on top of the material.
 * On all operations select Top Height as 'Stock Top' and enter the cutting head height for normal cutting (like 0.8mm).
-* On all operations set the Pierce Clearance under Linking, must be greater than the cutting height (like 1.5mm).
+* Make sure that the tools pierceHeight is greater than the cutting height (like 1.5mm) (topheight plus offset).
 * Under Passes | Compensation Type select 'In computer'.
 
 ## Things to do in the post options:
