@@ -3,6 +3,9 @@
 Creates .gcode files optimized for GRBL/grblHAL based Openbuilds-style machines.
 Supports router, laser and plasma operations.
 
+V1.0.41
+1. fixes namespace collision with 'power' variable that is now a readonly property of the postprocessor, affects plasma cutting.
+
 V1.0.40
 1. force G0 position after plasma probe
 1. fix plasma linearization of small arcs to avoid GRBL bug in arc after probe
