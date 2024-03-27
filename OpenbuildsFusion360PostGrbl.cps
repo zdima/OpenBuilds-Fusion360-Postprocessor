@@ -52,8 +52,9 @@
       Nov 2023 - V1.0.38 : Simple probing, each axis on its own, and xy corner, for BB4x with 3D probe, and machine simulation
    10 Feb 3024 - V1.0.39 : Add missing drill cycles, missing because probing failed to expand unhandled cycles
    13 Mar 2024 - V1.0.40 : force position after plasma probe, fix plasma linearization of small arcs to avoid GRBL bug in arc after probe, fix pierceClearance and pierceHeight, fix plasma kerfWidth
+   27 Mar 2024 - V1.0.41 : replace 'power' with OB.power (and friends) because postprocessor.power now exists and is readonly
 */
-obversion = 'V1.0.40';
+obversion = 'V1.0.41';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -315,14 +316,18 @@ var minimumFeedRate = toPreciseUnit(45, MM); // GRBL lower limit in mm/minute
 var fileIndexFormat = createFormat({width: 2, zeropad: true, decimals: 0});
 var isNewfile = false;  // set true when a new file has just been started
 
-var isLaser = false;    // set true for laser/water/
-var isPlasma = false;   // set true for plasma
-var power = 0;          // the setpower value, for S word when laser cutting
+// group our private variables together to Autodesk does not break us when they make something into a property
+var OB = {
+   power : 0,          // the setpower value, for S word when laser/plasma cutting
+   powerOn : false,    // is the laser power on? used for laser when haveRapid=false
+   isLaser : false,    // set true for laser/water/
+   isPlasma : false,   // set true for plasma
+   }
+
 var cutmode = 0;        // M3 or M4
 var Zmax = 0;
 var workOffset = 0;
 var haveRapid = false;  // assume no rapid moves
-var powerOn = false;    // is the laser power on? used for laser when haveRapid=false
 var retractHeight = 1;  // will be set by onParameter and used in onLinear to detect rapids
 var clearanceHeight = 10;  // will be set by onParameter
 var topHeight = 1;      // set by onParameter
@@ -764,19 +769,19 @@ function writeHeader(secID)
       var section = getSection(i);
       var tool = section.getTool();
       var rpm = section.getMaximumSpindleSpeed();
-      isLaser = isPlasma = false;
+      OB.isLaser = OB.isPlasma = false;
       switch (tool.type)
          {
          case TOOL_LASER_CUTTER:
-            isLaser = true;
+            OB.isLaser = true;
             break;
          case TOOL_WATER_JET:
          case TOOL_PLASMA_CUTTER:
-            isPlasma = true;
+            OB.isPlasma = true;
             break;
          default:
-            isLaser = false;
-            isPlasma = false;
+            OB.isLaser = false;
+            OB.isPlasma = false;
          }
 
       if (section.hasParameter("operation-comment"))
@@ -793,7 +798,7 @@ function writeHeader(secID)
          {
          writeComment("  Work Coordinate System : G" + (section.workOffset + 53));
          }
-      if (isLaser || isPlasma)
+      if (OB.isLaser || OB.isPlasma)
          writeComment("  Tool #" + tool.number + ": " + toTitleCase(getToolTypeName(tool.type)) + " Diam = " + xyzFormat.format(tool.jetDiameter) + unitstr);
       else
          {
@@ -832,7 +837,7 @@ function writeHeader(secID)
             }
          }
       }
-   if (isLaser || isPlasma)
+   if (OB.isLaser || OB.isPlasma)
       {
       allowHelicalMoves = false; // laser/plasma not doing this, ever
       }
@@ -994,7 +999,7 @@ function gotoInitial(checkit)
    // Rapid move to initial position, first XY, then Z, and do tool height check if needed
    forceAny();
    var initialPosition = getFramePosition(currentSection.getInitialPosition());
-   if (isLaser || isPlasma)
+   if (OB.isLaser || OB.isPlasma)
       {
       f = feedOutput.format(maxfeedrate);
       checkit = false; // never do a tool height check for laser/plasma, even if the user turns it on
@@ -1041,7 +1046,7 @@ function onSection()
 
    onRadiusCompensation(); // must check every section
 
-   if (isPlasma)
+   if (OB.isPlasma)
       {
       //DAF Mar2024 - pierceclearance is not the pierceheight, that is defined for the tool
       if (properties.plasma_pierceHeightoverride)
@@ -1056,7 +1061,7 @@ function onSection()
       writeComment("Plasma pierce height " + round(plasma_pierceHeight,3));
       writeComment("Plasma topHeight " + round(topHeight,3));
       }
-   if (isLaser || isPlasma)
+   if (OB.isLaser || OB.isPlasma)
       {
       // fake the radius larger else the arcs are too small before being linearized since kerfwidth is very small compared to normal tools
       toolRadius = tool.kerfWidth * 3;
@@ -1144,7 +1149,7 @@ function onSection()
    //if probing ensure coolant is off
    if (properties.hasCoolant)
       {
-      if (isLaser || isPlasma)
+      if (OB.isLaser || OB.isPlasma)
          {
          clnt = setCoolant(1); // always turn it on since plasma tool has no coolant option in fusion
          writeComment('laser coolant ' + clnt);
@@ -1160,30 +1165,30 @@ function onSection()
       {
       case TOOL_WATER_JET:
          writeComment("Waterjet cutting with GRBL.");
-         power = calcPower(100); // always 100%
+         OB.power = calcPower(100); // always 100%
          cutmode = 3;
-         isLaser = false;
-         isPlasma = true;
-         //writeBlock(mOutput.format(cutmode), sOutput.format(power));
+         OB.isLaser = false;
+         OB.isPlasma = true;
+         //writeBlock(mOutput.format(cutmode), sOutput.format(OB.power));
          break;
       case TOOL_LASER_CUTTER:
          //writeComment("Laser cutting with GRBL.");
-         isLaser = true;
-         isPlasma = false;
-         var pwas = power;
+         OB.isLaser = true;
+         OB.isPlasma = false;
+         var pwas = OB.power;
          switch (currentSection.jetMode)
             {
             case JET_MODE_THROUGH:
-               power = calcPower(properties.PowerThrough);
-               writeComment("LASER THROUGH CUTTING " + properties.PowerThrough + "percent = S" + power);
+               OB.power = calcPower(properties.PowerThrough);
+               writeComment("LASER THROUGH CUTTING " + properties.PowerThrough + "percent = S" + OB.power);
                break;
             case JET_MODE_ETCHING:
-               power = calcPower(properties.PowerEtch);
-               writeComment("LASER ETCH CUTTING " + properties.PowerEtch + "percent = S" + power);
+               OB.power = calcPower(properties.PowerEtch);
+               writeComment("LASER ETCH CUTTING " + properties.PowerEtch + "percent = S" + OB.power);
                break;
             case JET_MODE_VAPORIZE:
-               power = calcPower(properties.PowerVaporise);
-               writeComment("LASER VAPORIZE CUTTING " + properties.PowerVaporise + "percent = S" + power);
+               OB.power = calcPower(properties.PowerVaporise);
+               writeComment("LASER VAPORIZE CUTTING " + properties.PowerVaporise + "percent = S" + OB.power);
                break;
             default:
                error(localize("Unsupported cutting mode."));
@@ -1194,7 +1199,7 @@ function onSection()
             cutmode = 4; // always M4 mode unless cutting
          else
             cutmode = 3;
-         if (pwas != power)
+         if (pwas != OB.power)
             {
             sOutput.reset();
             //if (isFirstSection())
@@ -1202,18 +1207,18 @@ function onSection()
                writeBlock(mOutput.format(cutmode), sOutput.format(0), '; flash preventer'); // else you get a flash before the first g0 move
             else
                if (cuttingMode != 'cut')
-                  writeBlock(mOutput.format(cutmode), sOutput.format(power), clnt, '; section power');
+                  writeBlock(mOutput.format(cutmode), sOutput.format(OB.power), clnt, '; section power');
             }
          break;
       case TOOL_PLASMA_CUTTER:
          writeComment("Plasma cutting with GRBL.");
          if (properties.plasma_usetouchoff)
             writeComment("Using torch height probe and pierce delay.");
-         power = calcPower(100); // always 100%
+         OB.power = calcPower(100); // always 100%
          cutmode = 3;
-         isLaser = false;
-         isPlasma = true;
-         //writeBlock(mOutput.format(cutmode), sOutput.format(power));
+         OB.isLaser = false;
+         OB.isPlasma = true;
+         //writeBlock(mOutput.format(cutmode), sOutput.format(OB.power));
          break;
       case TOOL_PROBE:
          amProbing = true;
@@ -1224,11 +1229,11 @@ function onSection()
          break;
       default:
          //writeComment("tool.type = " + tool.type); // all milling tools
-         isPlasma = isLaser = false;
+         OB.isPlasma = OB.isLaser = false;
          break;
       }
 
-   if ( !isLaser && !isPlasma )
+   if ( !OB.isLaser && !OB.isPlasma )
       {
       // To be safe (after jogging to whatever position), move the spindle up to a safe home position before going to the initial position
       // At end of a section, spindle is retracted to clearance height, so it is only needed on the first section
@@ -1312,7 +1317,7 @@ function onSection()
 
    forceAny();
 
-   if (isLaser && properties.UseZ)
+   if (OB.isLaser && properties.UseZ)
       writeBlock(gMotionModal.format(0), zOutput.format(0));
    isNewfile = false;
    //writeComment("onSection end");
@@ -1346,7 +1351,7 @@ function onRapid(_x, _y, _z)
    {
    haveRapid = true;
    if (debugMode) writeComment("onRapid");
-   if (!isLaser && !isPlasma)
+   if (!OB.isLaser && !OB.isPlasma)
       {
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
@@ -1365,11 +1370,11 @@ function onRapid(_x, _y, _z)
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
       var z = "";
-      if (isPlasma && properties.UseZ)  // laser does not move Z during cuts
+      if (OB.isPlasma && properties.UseZ)  // laser does not move Z during cuts
          {
          z = zOutput.format(_z);
          }
-      if (isPlasma && properties.UseZ && (xyzFormat.format(_z) == xyzFormat.format(topHeight)) )
+      if (OB.isPlasma && properties.UseZ && (xyzFormat.format(_z) == xyzFormat.format(topHeight)) )
          {
          if (debugMode) writeComment("onRapid skipping Z motion");
          if (x || y)
@@ -1385,7 +1390,7 @@ function onRapid(_x, _y, _z)
 function onLinear(_x, _y, _z, feed)
    {
    //if (debugMode) writeComment("onLinear " + haveRapid);
-   if (powerOn || haveRapid)   // do not reset if power is off - for laser G0 moves
+   if (OB.powerOn || haveRapid)   // do not reset if power is off - for laser G0 moves
       {
       xOutput.reset();
       yOutput.reset(); // always output x and y else arcs go mad
@@ -1393,7 +1398,7 @@ function onLinear(_x, _y, _z, feed)
    var x = xOutput.format(_x);
    var y = yOutput.format(_y);
    var f = feedOutput.format(feed);
-   if (!isLaser && !isPlasma)
+   if (!OB.isLaser && !OB.isPlasma)
       {
       var z = zOutput.format(_z);
 
@@ -1429,11 +1434,11 @@ function onLinear(_x, _y, _z, feed)
       if (x || y)
          {
          var z = properties.UseZ ? zOutput.format(_z) : "";
-         var s = sOutput.format(power);
+         var s = sOutput.format(OB.power);
          if (haveRapid)
             {
             // this is the old process when we have rapids inserted by onRapid
-            if (!powerOn) // laser/plasma does some odd routing that should be rapid
+            if (!OB.powerOn) // laser/plasma does some odd routing that should be rapid
                writeBlock(gMotionModal.format(0), x, y, z, f, s);
             else
                writeBlock(gMotionModal.format(1), x, y, z, f, s);
@@ -1441,7 +1446,7 @@ function onLinear(_x, _y, _z, feed)
          else
             {
             // this is the new process when we dont have onRapid but GRBL requires G0 moves for noncutting laser moves
-            if (powerOn)
+            if (OB.powerOn)
                writeBlock(gMotionModal.format(1), x, y, z, f, s);
             else
                writeBlock(gMotionModal.format(0), x, y, z, f, s);
@@ -1675,7 +1680,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
    // note that larger arcs still have radius errors, but they are a much smaller percentage of the radius
    // and GRBL won't care
    var rad = Vector.diff(start,center).length;  // radius to NEW Center if it has been calculated
-   if ( (rad < toPreciseUnit(2, MM)) || isPlasma)  // only for small arcs, dont need to linearize a 24mm arc on a 50mm tool
+   if ( (rad < toPreciseUnit(2, MM)) || OB.isPlasma)  // only for small arcs, dont need to linearize a 24mm arc on a 50mm tool
       if (properties.linearizeSmallArcs && (rad < toolRadius))
          {
          if (debugMode) writeComment("linearizing arc radius " + round(rad, 4) + " toolRadius " + round(toolRadius, 3));
@@ -1684,7 +1689,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
          return;
          }
    // not small and not a full circle, output G2 or G3
-   if ((isLaser || isPlasma) && !powerOn)
+   if ((OB.isLaser || OB.isPlasma) && !OB.powerOn)
       {
       if (debugMode) writeComment("arc linearize rapid");
       linearize(tolerance * 10); // this is a rapid move so tolerance can be increased for faster motion and fewer lines of code
@@ -1697,7 +1702,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
             xOutput.reset();  // must always have X and Y
             yOutput.reset();
             // dont need to do ioutput and joutput because they are reference variables
-            if (!isLaser && !isPlasma)
+            if (!OB.isLaser && !OB.isPlasma)
                writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(center.x - start.x, 0), jOutput.format(center.y - start.y, 0), feedOutput.format(feed));
             else
                {
@@ -1706,7 +1711,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
                }
             break;
          case PLANE_ZX:
-            if (!isLaser && !isPlasma)
+            if (!OB.isLaser && !OB.isPlasma)
                {
                xOutput.reset(); // always have X and Z
                zOutput.reset();
@@ -1716,7 +1721,7 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed)
                linearize(tolerance);
             break;
          case PLANE_YZ:
-            if (!isLaser && !isPlasma)
+            if (!OB.isLaser && !OB.isPlasma)
                {
                yOutput.reset(); // always have Y and Z
                zOutput.reset();
@@ -1778,7 +1783,7 @@ function onSectionEnd()
 function onClose()
    {
    writeBlock(gAbsIncModal.format(90));   // Set to absolute coordinates for the following moves
-   if (!isLaser && !isPlasma)
+   if (!OB.isLaser && !OB.isPlasma)
       {
       gMotionModal.reset();  // for ease of reading the code always output the G0 words
       writeZretract();
@@ -1791,7 +1796,7 @@ function onClose()
       }
    //onDwell(properties.spindleOnOffDelay);                    // Wait for spindle to stop
    gMotionModal.reset();
-   if (!isLaser && !isPlasma)
+   if (!OB.isLaser && !OB.isPlasma)
       {
       if (properties.gotoMCSatend)    // go to MCS home
          {
@@ -1810,10 +1815,10 @@ function onClose()
       {
       if (properties.UseZ)
          {
-         if (isLaser)
+         if (OB.isLaser)
             writeBlock( gAbsIncModal.format(90), gFormat.format(53),
                         gMotionModal.format(0), zOutput.format(toPreciseUnit(properties.machineHomeZ, MM)) );
-         if (isPlasma)
+         if (OB.isPlasma)
             {
             xOutput.reset();
             yOutput.reset();
@@ -1923,20 +1928,20 @@ function onCommand(command)
          if (debugMode) writeComment("power off");
          if (!haveRapid)
             writeln("");
-         powerOn = false;
-         if (isPlasma || (isLaser && (cuttingMode == 'cut')) )
+         OB.powerOn = false;
+         if (OB.isPlasma || (OB.isLaser && (cuttingMode == 'cut')) )
             writeBlock(mFormat.format(5));
          break;
       case COMMAND_POWER_ON:
          if (debugMode) writeComment("power ON");
          if (!haveRapid)
             writeln("");
-         powerOn = true;
-         if (isPlasma || isLaser)
+         OB.powerOn = true;
+         if (OB.isPlasma || OB.isLaser)
             {
             if (properties.UseZ)
                {
-               if (properties.plasma_usetouchoff && isPlasma)
+               if (properties.plasma_usetouchoff && OB.isPlasma)
                   {
                   writeln("");
                   writeBlock( "G38.2", zOutput.format(toPreciseUnit(-plasma_probedistance, MM)), feedOutput.format(toPreciseUnit(plasma_proberate, MM)));
@@ -1956,8 +1961,8 @@ function onCommand(command)
                else
                   writeBlock( gMotionModal.format(0), zOutput.format(plasma_pierceHeight));
                }
-            if (isPlasma || (cuttingMode == 'cut') || (clnt))
-               writeBlock(mFormat.format(3), sOutput.format(power), clnt);
+            if (OB.isPlasma || (cuttingMode == 'cut') || (clnt))
+               writeBlock(mFormat.format(3), sOutput.format(OB.power), clnt);
             }
          break;
       default:
@@ -1986,13 +1991,13 @@ function onParameter(name, value)
    if (name.indexOf("movement:lead_in") != -1)
       {
       leadinRate = value;
-      if (debugMode && isPlasma) writeComment("onparameter - leadinRate set " + leadinRate);
+      if (debugMode && OB.isPlasma) writeComment("onparameter - leadinRate set " + leadinRate);
       }
 
    if (name.indexOf("operation:topHeight_value") >= 0)
       {
       topHeight = value;
-      if (debugMode && isPlasma) writeComment("onparameter - topHeight set " + topHeight);
+      if (debugMode && OB.isPlasma) writeComment("onparameter - topHeight set " + topHeight);
       }
    if (name.indexOf('operation:cuttingMode') >= 0)
       {
