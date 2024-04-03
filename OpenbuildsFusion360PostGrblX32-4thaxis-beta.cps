@@ -27,16 +27,17 @@
 
    Changelog
    xx/Dec/2022 - V0.0.1     : Initial version (Swarfer)
-   Jan 2024 - V0.0.2b : machine simulation
+   Jan 2024 - V0.0.3b : machine simulation
+   MAr 2024 - V0.0.4 : remove alert() calls
 
 */
-obversion = 'V0.0.2_beta';
+obversion = 'V0.0.3_beta';
 debugMode = false;
 description = "OB BBx32 Multi-axis Post Processor Milling Only";
 vendor = "Openbuilds";
 vendorUrl = "http://www.openbuilds.com";
 machineControl = "grblHAL 1.1 ESP32 / BlackBox X32 XYZA",
-legal = "Copyright (C) 2012-2023 by Autodesk, Inc. and OpenBuilds.com";
+legal = "Copyright (C) 2012-2023 by Autodesk, Inc. and OpenBuilds.com 2024";
 model = "grblHAL";
 certificationLevel = 2;
 minimumRevision = 45892;
@@ -60,7 +61,7 @@ allowSpiralMoves = false;
 allowedCircularPlanes = (1 << PLANE_XY); // allow only XY plane
 // if you need vertical arcs then uncomment the line below
 allowedCircularPlanes = (1 << PLANE_XY) | (1 << PLANE_ZX) | (1 << PLANE_YZ); // allow all planes, recentering arcs solves YZ/XZ arcs
-// if you allow vertical arcs then be aware that ObCONTROL will not display the gocde correctly, but it WILL cut correctly.
+// if you allow vertical arcs then be aware that ObCONTROL will not display the gcode correctly, but it WILL cut correctly.
 
 /*
    useMultiAxisFeatures: { // DTS remove this and make always false
@@ -1040,7 +1041,7 @@ function onSection()
    var sectionId = getCurrentSectionId();       // what is the number of this operation (starts from 0)
    var section = getSection(sectionId);         // what is the section-object for this operation
    var tool = section.getTool();
-   var maxfeedrate = section.getMaximumFeedrate();
+   //var maxfeedrate = section.getMaximumFeedrate();
    haveRapid = false; // drilling sections will have rapids even when other ops do not
 
    onRadiusCompensation(); // must check every section
@@ -2622,13 +2623,17 @@ function rpm2dial(rpm, op)
          }
    if (rpm < speeds[1])
       {
-      alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.");
+      var msg = "Warning " + rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.";
+      warning(msg);
+      writeComment(msg);
       return 1;
       }
 
    if (rpm > speeds[speeds.length - 1])
       {
-      alert("Warning", rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm in the " + op + " operation.");
+      var alert = "Warning " + rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm in the " + op + " operation.";
+      warning(alert);
+      writeComment(alert);
       return (speeds.length - 1);
       }
 
@@ -2641,7 +2646,6 @@ function rpm2dial(rpm, op)
          }
       }
 
-   alert("Error", "Error in calculating router speed dial.");
    error("Fatal Error calculating router speed dial.");
    return 0;
    }

@@ -1,4 +1,5 @@
 /*
+/*
    Custom Post-Processor for GRBL based Openbuilds-style CNC machines, router and laser-cutting
    Made possible by
    Swarfer  https://github.com/swarfer/GRBL-Post-Processor
@@ -53,8 +54,9 @@
    10 Feb 3024 - V1.0.39 : Add missing drill cycles, missing because probing failed to expand unhandled cycles
    13 Mar 2024 - V1.0.40 : force position after plasma probe, fix plasma linearization of small arcs to avoid GRBL bug in arc after probe, fix pierceClearance and pierceHeight, fix plasma kerfWidth
    27 Mar 2024 - V1.0.41 : replace 'power' with OB.power (and friends) because postprocessor.power now exists and is readonly
+   30 Mar 2024 - V1.0.42 : postprocessor.alert() method has disappeared - replaced with warning(msg) and writeComment(msg), moved more stuff into OB. and SPL.
 */
-obversion = 'V1.0.41';
+obversion = 'V1.0.42';
 description = "OpenBuilds CNC : GRBL/BlackBox";  // cannot have brackets in comments
 longDescription = description + " : Post" + obversion; // adds description to post library dialog box
 vendor = "OpenBuilds";
@@ -83,12 +85,15 @@ allowSpiralMoves = false;
 allowedCircularPlanes = (1 << PLANE_XY); // allow only XY plane
 // if you need vertical arcs then uncomment the line below
 //allowedCircularPlanes = (1 << PLANE_XY) | (1 << PLANE_ZX) | (1 << PLANE_YZ); // allow all planes, recentering arcs solves YZ/XZ arcs
-// if you allow vertical arcs then be aware that ObCONTROL will not display the gocde correctly, but it WILL cut correctly.
+// if you allow vertical arcs then be aware that ObCONTROL will not display the gcode correctly, but it WILL cut correctly.
 
 // things for splitting on linecount, aka tapesplitting
-var tapelines = 0;
-var linecnt = 0;
-var forceSplit = false;
+var SPL = 
+   {
+   tapelines : 0,
+   linecnt : 0,
+   forceSplit : false
+   }
 
 // user-defined properties : defaults are set, but they can be changed from a dialog box in Fusion when doing a post.
 properties =
@@ -116,7 +121,7 @@ properties =
 
    linearizeSmallArcs: true,     // arcs with radius < toolRadius have radius errors, linearize instead?
    machineVendor : "OpenBuilds",
-   modelMachine : "Generic",
+   modelMachine : "Generic XYZ",
    machineControl : "Grbl 1.1 / BlackBox",
 
    checkZ : false,    // true for a PS tool height checkmove at start of every file
@@ -318,30 +323,32 @@ var isNewfile = false;  // set true when a new file has just been started
 
 // group our private variables together to Autodesk does not break us when they make something into a property
 var OB = {
-   power : 0,          // the setpower value, for S word when laser/plasma cutting
-   powerOn : false,    // is the laser power on? used for laser when haveRapid=false
-   isLaser : false,    // set true for laser/water/
-   isPlasma : false,   // set true for plasma
-   }
+   power : 0,           // the setpower value, for S word when laser/plasma cutting
+   powerOn : false,     // is the laser power on? used for laser when haveRapid=false
+   isLaser : false,     // set true for laser/water/
+   isPlasma : false,    // set true for plasma
+   cutmode :  0,        // M3 or M4
+   cuttingMode : 'none',  // set by onParameter for laser/plasma
+   leadinRate : 314,    // set by onParameter: the lead-in feedrate,plasma
+   haveRapid : false    // assume no rapid moves
+}
 
-var cutmode = 0;        // M3 or M4
-var Zmax = 0;
 var workOffset = 0;
-var haveRapid = false;  // assume no rapid moves
-var retractHeight = 1;  // will be set by onParameter and used in onLinear to detect rapids
+var retractHeight = 1;     // will be set by onParameter and used in onLinear to detect rapids
 var clearanceHeight = 10;  // will be set by onParameter
-var topHeight = 1;      // set by onParameter
-var leadinRate = 314;   // set by onParameter: the lead-in feedrate,plasma
-var cuttingMode = 'none'; // set by onParameter for laser/plasma
-var linmove = 1;        // linear move mode
-var toolRadius;         // for arc linearization
-var plasma_pierceHeight = 3.14; // set by onParameter from Linking|PierceClearance
-var coolantIsOn = 0;    // set when coolant is used to we can do intelligent turn off
+var topHeight = 1;         // set by onParameter
+var linmove = 1;           // linear move mode
+var toolRadius;            // for arc linearization
+var plasma_pierceHeight = 3.14; // set by onParameter 
+var coolantIsOn = 0;       // set when coolant is used to we can do intelligent turn off
 var currentworkOffset = 54; // the current WCS in use, so we can retract Z between sections if needed
-var clnt = '';          // coolant code to add to spindle line
-var feedProbeLink = 1000;     // probe linking moves feedrate
-var feedProbeMeasure =  102;  // probing feedrate
-var probe_output_work_offset = 0; // the WCS to update when probing
+var clnt = '';             // coolant code to add to spindle line
+
+var PRB = {
+   feedProbeLink : 1000,         // probe linking moves feedrate
+   feedProbeMeasure : 102,       // probing feedrate
+   probe_output_work_offset : 0  // the WCS to update when probing
+   }
 
 // Start of machine configuration logic
 var compensateToolLength = false; // add the tool length to the pivot distance for nonTCP rotary heads
@@ -494,6 +501,8 @@ function rpm2dial(rpm, op)
    // array which maps spindle speeds to router dial settings,
    // according to Makita RT0700 Manual : 1=10000, 2=12000, 3=17000, 4=22000, 5=27000, 6=30000
    // according to Dewalt 611 Manual : 1=16000, 2=18200, 3=20400, 4=22600, 5=24800, 6=27000
+   var wmsg = "";
+
    if (isProbeOperation())      
       return 1;
 
@@ -514,13 +523,17 @@ function rpm2dial(rpm, op)
 
    if (rpm < speeds[1])
       {
-      alert("Warning", rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.");
+      wmsg = "WARNING " + rpm + " rpm is below minimum spindle RPM of " + speeds[1] + " rpm in the " + op + " operation.";
+      warning(wmsg);
+      writeComment(wmsg);
       return 1;
       }
 
    if (rpm > speeds[speeds.length - 1])
       {
-      alert("Warning", rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm in the " + op + " operation.");
+      wmsg = "WARNING " + rpm + " rpm is above maximum spindle RPM of " + speeds[speeds.length - 1] + " rpm in the " + op + " operation.";
+      warning(wmsg);
+      writeComment(wmsg);
       return (speeds.length - 1);
       }
 
@@ -533,7 +546,6 @@ function rpm2dial(rpm, op)
          }
       }
 
-   alert("Error", "Error in calculating router speed dial.");
    error("Fatal Error calculating router speed dial.");
    return 0;
    }
@@ -543,45 +555,41 @@ function checkMinFeedrate(section, op)
    var alertMsg = "";
    if (section.getParameter("operation:tool_feedCutting") < minimumFeedRate)
       {
-      var alertMsg = "Cutting\n";
-      //alert("Warning", "The cutting feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+      alertMsg = "Cutting\n";
       }
 
    if (section.getParameter("operation:tool_feedRetract") < minimumFeedRate)
       {
-      var alertMsg = alertMsg + "Retract\n";
-      //alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+      alertMsg = alertMsg + "Retract\n";
       }
 
    if (section.getParameter("operation:tool_feedEntry") < minimumFeedRate)
       {
-      var alertMsg = alertMsg + "Entry\n";
-      //alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+      alertMsg = alertMsg + "Entry\n";
       }
 
    if (section.getParameter("operation:tool_feedExit") < minimumFeedRate)
       {
-      var alertMsg = alertMsg + "Exit\n";
-      //alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+      alertMsg = alertMsg + "Exit\n";
       }
 
    if (section.getParameter("operation:tool_feedRamp") < minimumFeedRate)
       {
-      var alertMsg = alertMsg + "Ramp\n";
-      //alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+      alertMsg = alertMsg + "Ramp\n";
       }
 
    if (section.getParameter("operation:tool_feedPlunge") < minimumFeedRate)
       {
-      var alertMsg = alertMsg + "Plunge\n";
-      //alert("Warning", "The retract feedrate in " + op + "  is set below the minimum feedrate that grbl supports.");
+      alertMsg = alertMsg + "Plunge\n";
       }
 
    if (alertMsg != "")
       {
       var fF = createFormat({decimals: 0, suffix: (unit == MM ? "mm" : "in" )});
       var fo = createVariable({}, fF);
-      alert("Warning", "The following feedrates in " + op + "  are set below the minimum feedrate that GRBL supports.  The feedrate should be higher than " + fo.format(minimumFeedRate) + " per minute.\n\n" + alertMsg);
+      var wmsg = "WARNING " + "The following feedrates in " + op + "  are set below the minimum feedrate that GRBL supports.  The feedrate should be higher than " + fo.format(minimumFeedRate) + " per minute.\n\n" + alertMsg;
+      warning(wmsg);
+      writeComment(wmsg);
       }
    }
 
@@ -592,7 +600,7 @@ function checkMinFeedrate(section, op)
 function writeBlock()
    {
    writeWords(arguments);
-   if (tapelines)   linecnt++;   
+   if (SPL.tapelines)   SPL.linecnt++;   
    }
 
 /**
@@ -860,7 +868,9 @@ function writeHeader(secID)
    writeln("");
    if (debugMode)
       {
-      writeComment("debugMode is true");
+         var msg = "debugMode is true";
+      writeComment(msg);
+      warning(msg);
       writeln("");
       }
    }
@@ -881,7 +891,7 @@ function onOpen()
    numberOfSections = getNumberOfSections();
    if (properties.splitLines > 0)   
       {
-      tapelines = properties.splitLines;
+      SPL.tapelines = properties.splitLines;
       }
    
    if (debugMode) writeComment("onOpen");
@@ -929,7 +939,9 @@ function onOpen()
       }
    if (multipleToolError)
       {
-      alert("Warning", "Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.");
+      var mte = "WARNING " + "Multiple tools found.  This post does not support tool changes.  You should repost and select True for Multiple Files in the post properties.";
+      warning(mte);
+      writeComment(mte);
       }
 
    writeHeader(0);
@@ -1042,7 +1054,7 @@ function onSection()
    var tool = section.getTool();
    var maxfeedrate = section.getMaximumFeedrate();
    var amProbing = false;
-   haveRapid = false; // drilling sections will have rapids even when other ops do not, and so do probe routines
+   OB.haveRapid = false; // drilling sections will have rapids even when other ops do not, and so do probe routines
 
    onRadiusCompensation(); // must check every section
 
@@ -1077,7 +1089,7 @@ function onSection()
 
    var splitHere = !isFirstSection() && properties.generateMultiple && (tool.number != getPreviousSection().getTool().number);
    // to split on linecount, we need to force it here
-   if (forceSplit)
+   if (SPL.forceSplit)
       {
       splitHere = true;  // will open a new file
       writeComment('Starting new file due to line count');
@@ -1088,7 +1100,7 @@ function onSection()
       {
       sequenceNumber++;
       var path = makeFileName(sequenceNumber);
-      if (forceSplit)
+      if (SPL.forceSplit)
          writeComment("Next file " + path);  
 
       if (isRedirecting())
@@ -1102,11 +1114,11 @@ function onSection()
       writeHeader(getCurrentSectionId());
       isNewfile = true;  // trigger a spindleondelay
       }
-   if (forceSplit)    
+   if (SPL.forceSplit)    
       { 
       forceAll();
       writeComment("Continuing operation, run previous file, " + String(sequenceNumber - 1) + ", first");
-      forceSplit = false;
+      SPL.forceSplit = false;
       gMotionModal.reset();
       writeZretract();
       }
@@ -1133,7 +1145,9 @@ function onSection()
       
    if ((section.workOffset < 1) || (section.workOffset > 6))
       {
-      alert("Warning", "Invalid Work Coordinate System. Select WCS 1..6 in SETUP:PostProcess tab. Selecting default WCS1/G54");
+      var mcsmsg = "WARNING " + "Invalid Work Coordinate System. Select WCS 1..6 in SETUP:PostProcess tab. Selecting default WCS1/G54";
+      warning(mcsmsg);
+      writeComment(mcsmsg);
       //section.workOffset = 1;  // If no WCS is set (or out of range), then default to WCS1 / G54 : swarfer: this appears to be readonly
       writeBlock(gWCSOutput.format(54));  // output what we want, G54
       currentworkOffset = 54;
@@ -1146,7 +1160,7 @@ function onSection()
    writeBlock(gAbsIncModal.format(90));  // Set to absolute coordinates
 
    // If the machine has coolant, write M8/M7 or M9 on spindle control line
-   //if probing ensure coolant is off
+   // if probing ensure coolant is off
    if (properties.hasCoolant)
       {
       if (OB.isLaser || OB.isPlasma)
@@ -1159,14 +1173,14 @@ function onSection()
       }
 
 
-   cutmode = -1;
+   OB.cutmode = -1;
    //writeComment("isMilling=" + isMilling() + "  isjet=" +isJet() + "  islaser=" + isLaser);
    switch (tool.type)
       {
       case TOOL_WATER_JET:
          writeComment("Waterjet cutting with GRBL.");
          OB.power = calcPower(100); // always 100%
-         cutmode = 3;
+         OB.cutmode = 3;
          OB.isLaser = false;
          OB.isPlasma = true;
          //writeBlock(mOutput.format(cutmode), sOutput.format(OB.power));
@@ -1195,19 +1209,19 @@ function onSection()
                return;
             }
          // figure cutmode, M3 or M4
-         if ((cuttingMode == 'etch') || (cuttingMode == 'vaporize'))
-            cutmode = 4; // always M4 mode unless cutting
+         if ((OB.cuttingMode == 'etch') || (OB.cuttingMode == 'vaporize'))
+            OB.cutmode = 4; // always M4 mode unless cutting
          else
-            cutmode = 3;
+            OB.cutmode = 3;
          if (pwas != OB.power)
             {
             sOutput.reset();
             //if (isFirstSection())
-            if (cutmode == 3)
-               writeBlock(mOutput.format(cutmode), sOutput.format(0), '; flash preventer'); // else you get a flash before the first g0 move
+            if (OB.cutmode == 3)
+               writeBlock(mOutput.format(OB.cutmode), sOutput.format(0), '; flash preventer'); // else you get a flash before the first g0 move
             else
-               if (cuttingMode != 'cut')
-                  writeBlock(mOutput.format(cutmode), sOutput.format(OB.power), clnt, '; section power');
+               if (OB.cuttingMode != 'cut')
+                  writeBlock(mOutput.format(OB.cutmode), sOutput.format(OB.power), clnt, '; section power');
             }
          break;
       case TOOL_PLASMA_CUTTER:
@@ -1215,7 +1229,7 @@ function onSection()
          if (properties.plasma_usetouchoff)
             writeComment("Using torch height probe and pierce delay.");
          OB.power = calcPower(100); // always 100%
-         cutmode = 3;
+         OB.cutmode = 3;
          OB.isLaser = false;
          OB.isPlasma = true;
          //writeBlock(mOutput.format(cutmode), sOutput.format(OB.power));
@@ -1286,7 +1300,7 @@ function onSection()
                }
             else
                {
-               alert("Error", "Counter-clockwise Spindle Operation found, but your spindle does not support this");
+               warning("ERROR - Counter-clockwise Spindle Operation found, but your spindle does not support this");
                error("Fatal Error in Operation " + (sectionId + 1) + ": Counter-clockwise Spindle Operation found, but your spindle does not support this");
                return;
                }
@@ -1310,7 +1324,7 @@ function onSection()
    var remaining = currentSection.workPlane;
    if (!isSameDirection(remaining.forward, new Vector(0, 0, 1)))
       {
-      alert("Error", "Tool-Rotation detected - GRBL only supports 3 Axis");
+      warning("ERROR : Tool-Rotation detected - this GRBL post only supports 3 Axis");
       error("Fatal Error in Operation " + (sectionId + 1) + ": Tool-Rotation detected but GRBL only supports 3 Axis");
       }
    setRotation(remaining);
@@ -1341,7 +1355,7 @@ function onRadiusCompensation()
    var sectionId = getCurrentSectionId();
    if (radComp != RADIUS_COMPENSATION_OFF)
       {
-      alert("Error", "RadiusCompensation is not supported in GRBL - Change RadiusCompensation in CAD/CAM software to Off/Center/Computer");
+      warning("ERROR : RadiusCompensation is not supported in GRBL - Change RadiusCompensation in CAD/CAM software to Off/Center/Computer");
       error("Fatal Error in Operation " + (sectionId + 1) + ": RadiusCompensation is found in CAD file but is not supported in GRBL");
       return;
       }
@@ -1349,7 +1363,7 @@ function onRadiusCompensation()
 
 function onRapid(_x, _y, _z)
    {
-   haveRapid = true;
+   OB.haveRapid = true;
    if (debugMode) writeComment("onRapid");
    if (!OB.isLaser && !OB.isPlasma)
       {
@@ -1365,8 +1379,6 @@ function onRapid(_x, _y, _z)
       }
    else
       {
-      if (_z > Zmax) // store max z value for ending
-         Zmax = _z;
       var x = xOutput.format(_x);
       var y = yOutput.format(_y);
       var z = "";
@@ -1390,7 +1402,7 @@ function onRapid(_x, _y, _z)
 function onLinear(_x, _y, _z, feed)
    {
    //if (debugMode) writeComment("onLinear " + haveRapid);
-   if (OB.powerOn || haveRapid)   // do not reset if power is off - for laser G0 moves
+   if (OB.powerOn || OB.haveRapid)   // do not reset if power is off - for laser G0 moves
       {
       xOutput.reset();
       yOutput.reset(); // always output x and y else arcs go mad
@@ -1405,7 +1417,7 @@ function onLinear(_x, _y, _z, feed)
       if (x || y || z)
          {
          linmove = 1;          // have to have a default!
-         if (!haveRapid && z)  // if z is changing
+         if (!OB.haveRapid && z)  // if z is changing
             {
             if (_z < retractHeight) // compare it to retractHeight, below that is G1, >= is G0
                linmove = 1;
@@ -1435,7 +1447,7 @@ function onLinear(_x, _y, _z, feed)
          {
          var z = properties.UseZ ? zOutput.format(_z) : "";
          var s = sOutput.format(OB.power);
-         if (haveRapid)
+         if (OB.haveRapid)
             {
             // this is the old process when we have rapids inserted by onRapid
             if (!OB.powerOn) // laser/plasma does some odd routing that should be rapid
@@ -1454,24 +1466,24 @@ function onLinear(_x, _y, _z, feed)
 
          }
       }
-   if (linecnt > tapelines)   
+   if (SPL.linecnt > SPL.tapelines)   
       {
-      if (debugMode) writeComment('Tapelines ' + tapelines);
-      linecnt = 0;
+      if (debugMode) writeComment('Tapelines ' + SPL.tapelines);
+      SPL.linecnt = 0;
       splitHere(_x,_y,_z,feed);
       }
    }
 
 function onRapid5D(_x, _y, _z, _a, _b, _c)
    {
-   alert("Error", "Tool-Rotation detected - GRBL only supports 3 Axis");
-   error("Tool-Rotation detected but GRBL only supports 3 Axis");
+   warning("ERROR : Tool-Rotation detected - this GRBL post only supports 3 Axis");
+   error("Tool-Rotation detected but this GRBL post only supports 3 Axis");
    }
 
 function onLinear5D(_x, _y, _z, _a, _b, _c, feed)
    {
-   alert("Error", "Tool-Rotation detected - GRBL only supports 3 Axis");
-   error("Tool-Rotation detected but GRBL only supports 3 Axis");
+   warning("ERROR : Tool-Rotation detected - this GRBL post only supports 3 Axis");
+   error("Tool-Rotation detected but this GRBL post only supports 3 Axis");
    }
 
 // this code was generated with the help of ChatGPT AI
@@ -1746,7 +1758,7 @@ function splitHere(_x,_y,_z,_f)
    if (debugMode) writeComment('splitHere: Splitting file');
    //onClose();
    // open new file
-   forceSplit = true;
+   SPL.forceSplit = true;
    // write header
    onSection();
    // goto x,y
@@ -1926,15 +1938,15 @@ function onCommand(command)
          break;
       case COMMAND_POWER_OFF:
          if (debugMode) writeComment("power off");
-         if (!haveRapid)
+         if (!OB.haveRapid)
             writeln("");
          OB.powerOn = false;
-         if (OB.isPlasma || (OB.isLaser && (cuttingMode == 'cut')) )
+         if (OB.isPlasma || (OB.isLaser && (OB.cuttingMode == 'cut')) )
             writeBlock(mFormat.format(5));
          break;
       case COMMAND_POWER_ON:
          if (debugMode) writeComment("power ON");
-         if (!haveRapid)
+         if (!OB.haveRapid)
             writeln("");
          OB.powerOn = true;
          if (OB.isPlasma || OB.isLaser)
@@ -1961,7 +1973,7 @@ function onCommand(command)
                else
                   writeBlock( gMotionModal.format(0), zOutput.format(plasma_pierceHeight));
                }
-            if (OB.isPlasma || (cuttingMode == 'cut') || (clnt))
+            if (OB.isPlasma || (OB.cuttingMode == 'cut') || (clnt))
                writeBlock(mFormat.format(3), sOutput.format(OB.power), clnt);
             }
          break;
@@ -1990,8 +2002,8 @@ function onParameter(name, value)
 
    if (name.indexOf("movement:lead_in") != -1)
       {
-      leadinRate = value;
-      if (debugMode && OB.isPlasma) writeComment("onparameter - leadinRate set " + leadinRate);
+      OB.leadinRate = value;
+      if (debugMode && OB.isPlasma) writeComment("onparameter - leadinRate set " + OB.leadinRate);
       }
 
    if (name.indexOf("operation:topHeight_value") >= 0)
@@ -2001,12 +2013,12 @@ function onParameter(name, value)
       }
    if (name.indexOf('operation:cuttingMode') >= 0)
       {
-      cuttingMode = value;
-      if (debugMode) writeComment("onparameter - cuttingMode set " + cuttingMode);
-      if (cuttingMode.indexOf('cut') >= 0) // simplify later logic, auto/low/medium/high are all 'cut'
-         cuttingMode = 'cut';
-      if (cuttingMode.indexOf('auto') >= 0)
-         cuttingMode = 'cut';
+      OB.cuttingMode = value;
+      if (debugMode) writeComment("onparameter - cuttingMode set " + OB.cuttingMode);
+      if (OB.cuttingMode.indexOf('cut') >= 0) // simplify later logic, auto/low/medium/high are all 'cut'
+         OB.cuttingMode = 'cut';
+      if (OB.cuttingMode.indexOf('auto') >= 0)
+         OB.cuttingMode = 'cut';
       }
    // (onParameter =operation:pierceClearance= 1.5)    for plasma
    // if (name == 'operation:pierceClearance')
@@ -2032,30 +2044,30 @@ function onParameter(name, value)
       onDwell(properties.spindleOnOffDelay);
       if (properties.UseZ) // done a probe and/or pierce, now lower to cut height
          {
-         writeBlock( gMotionModal.format(1), zOutput.format(topHeight), feedOutput.format(leadinRate) );
+         writeBlock( gMotionModal.format(1), zOutput.format(topHeight), feedOutput.format(OB.leadinRate) );
          gMotionModal.reset();
          }
       }
    if (name == 'operation:tool_feedProbeLink')
       {
-      feedProbeLink = value;
-      if (debugMode) writeComment("onparameter - feedPRobeLink set " + feedProbeLink);
+      PRB.feedProbeLink = value;
+      if (debugMode) writeComment("onparameter - feedProbeLink set " + PRB.feedProbeLink);
       }
    if (name == 'operation:tool_feedProbeMeasure')
       {
-      feedProbeMeasure = value;   
-      if (debugMode) writeComment("onparameter - feedProbeMeasure set " + feedProbeMeasure);
+      PRB.feedProbeMeasure = value;   
+      if (debugMode) writeComment("onparameter - feedProbeMeasure set " + PRB.feedProbeMeasure);
       }
    if (name == 'operation:probeWorkOffset')
       {
       //writeComment('override wcs ' + value)   ;
       if (value > 0)
-         warning('You set a probe *Overide Driving WCS* but I dont know how to do that yet');   
+         warning("WARNING " + 'You set a probe *Overide Driving WCS* but I dont know how to do that yet');   
       }
    if (name == 'probe-output-work-offset')
       {
-      probe_output_work_offset = value;
-      if (debugMode) writeComment("onparameter - probe_output_work_offset set " + probe_output_work_offset);
+      PRB.probe_output_work_offset = value;
+      if (debugMode) writeComment("onparameter - probe_output_work_offset set " + PRB.probe_output_work_offset);
       }
    }
 
@@ -2104,8 +2116,9 @@ function setCoolant(coolval)
          coolantIsOn = 7;
          break;
       default:
-         writeComment("Coolant option not understood: " + coolval);
-         alert("Warning", "Coolant option not understood: " + coolval);
+         var cmsg = "WARNING " + "Coolant option not understood: " + coolval;
+         warning(cmsg);
+         writeComment(cmsg);
          coolantIsOn = 0;
       }
    if ( debugMode) writeComment("setCoolant end " + cresult);
@@ -2182,10 +2195,10 @@ function probeX(x,y,z)
    // retract a little
    writeBlock(gMotionModal.format(0), xOutput.format(-dir * (cycle.probeOvertravel + toolRadius) ) ," ; retract");
    //reprobe slower
-   var _f = feedOutput.format(feedProbeMeasure);
+   var _f = feedOutput.format(PRB.feedProbeMeasure);
    writeBlock(gProbeModal.format(38.2), _x, _f, " ; probe slow");
    // setzero
-   _p = pWord.format(probe_output_work_offset);
+   _p = pWord.format(PRB.probe_output_work_offset);
    writeBlock(gMotionModal.format(10), "L20", _p, xOutput.format(-dir * toolRadius));
    // move X away a bit, relative!
    _x = xOutput.format(-dir * cycle.probeClearance);
@@ -2228,10 +2241,10 @@ function probeY(x,y,z)
    // retract a little
    writeBlock(gMotionModal.format(0), yOutput.format(-dir * cycle.probeOvertravel) ," ; retract");
    //reprobe slower
-   var _f = feedOutput.format(feedProbeMeasure);
+   var _f = feedOutput.format(PRB.feedProbeMeasure);
    writeBlock(gProbeModal.format(38.2), _y, _f, " ; probe slow");
    // setzero
-   _p = pWord.format(probe_output_work_offset);
+   _p = pWord.format(PRB.probe_output_work_offset);
    writeBlock(gMotionModal.format(10), "L20", _p, yOutput.format(-dir * toolRadius));
    // move Y away a bit, relative!
    _y = yOutput.format(-dir * cycle.probeClearance);
@@ -2260,10 +2273,10 @@ function probeZ(x,y,z)
    writeBlock(gMotionModal.format(0) , _z);
    // reprobe slow
    _z = zOutput.format(-(cycle.clearance + cycle.probeOvertravel));
-   _f = feedOutput.format(feedProbeMeasure);
+   _f = feedOutput.format(PRB.feedProbeMeasure);
    writeBlock(gProbeModal.format(38.2), _z, _f, " ; probe slow");
    // set WCS
-   _p = pWord.format(probe_output_work_offset);
+   _p = pWord.format(PRB.probe_output_work_offset);
    writeBlock(gMotionModal.format(10), "L20", _p, zOutput.format(0));
    // raise Z relative
    _z = zOutput.format(cycle.retract);
