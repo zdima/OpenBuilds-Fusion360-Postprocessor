@@ -3,6 +3,17 @@
 Creates .gcode files optimized for GRBL/grblHAL based Openbuilds-style machines.
 Supports router, laser and plasma operations.
 
+V1.0.43
+1. Plasma: if tool setting for pierceTime is set AND spindleonoffdelay is 0 then tool.pierceTime will be used.
+1. Plasma: if tool setting for PierceHeight is set and pierceHeightoverride is false then tool value will be used.
+1. Plasma: if tool setting for cutHeight is set and topHeight is 0 then tool.cutHeight will be used.
+   DO read the plasma [instructions](https://github.com/OpenBuilds/OpenBuilds-Fusion360-Postprocessor/blob/master/README-plasma.md) !
+1. Fix failure to convert some properties to float values by using parseFloat, seems to be needed due to recent upgrades to Fusion360.
+
+V1.0.42
+1. postprocessor.alert() method has disappeared - replaced with warning(msg) and writeComment(msg).
+1. moved more stuff into OB. and SPL. to keep it private.
+
 V1.0.41
 1. fixes namespace collision with 'power' variable that is now a readonly property of the postprocessor, affects plasma cutting.
 
@@ -16,7 +27,8 @@ V1.0.39
 1. fix missing drill cycles
 
 V1.0.38 and V0.0.2_beta
-1. Main post : Simple probing, each axis on its own, and XY corner, for BB4x with 3D probe, and machine simulation.
+1. Main post : Simple probing, each axis on its own, and XY corner, for BB4x with 3D probe.
+1. Main post : machine simulation enabled.
 1. X32 4th axis beta post: machine simulation enabled.
 
 V1.0.37
@@ -26,7 +38,7 @@ V1.0.37
    (It will also split on toolchanges if both options are selected)
 
 V1.0.36
-1. code to recenter arcs with bad radii   - this enables use of vertical arcs in lead-in/lead-out moves
+1. code to recenter arcs with bad radii - this enables use of vertical arcs in lead-in/lead-out moves (you must also enable verticla arcs in the post).
 
 V1.0.35
 1. plasma pierce height override,  spindle speed change always with an M3, version number display   
