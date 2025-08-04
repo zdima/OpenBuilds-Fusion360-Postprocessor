@@ -1443,9 +1443,10 @@ function onLinear(_x, _y, _z, feed)
       if (x || y || z)
          {
          linmove = 1;          // have to have a default!
-         if (!OB.haveRapid && z)  // if z is changing
+         if (!OB.haveRapid)
             {
-            if (_z < retractHeight) // compare it to retractHeight, below that is G1, >= is G0
+            var currentZ = zOutput.getCurrent()
+            if (currentZ < retractHeight) // compare it to retractHeight, below that is G1, >= is G0
                linmove = 1;
             else
                linmove = 0;
